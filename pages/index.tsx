@@ -1,5 +1,5 @@
 // pages/index.tsx
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import {
   useAccount,
@@ -11,6 +11,7 @@ import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
 import { erc20Abi } from 'viem'
 import { getAddress, formatUnits } from 'viem'
+import { CowSwapWidget, CowSwapWidgetParams } from '@cowprotocol/widget-react'
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
@@ -26,7 +27,7 @@ type ZeroExQuote = {
 
 async function get0xQuoteBase(opts: {
   sellToken: string
-  buyToken: string // ERC-20 ou 'ETH'
+  buyToken: string // ERC20 ou 'ETH'
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
@@ -36,7 +37,7 @@ async function get0xQuoteBase(opts: {
   const { data } = await axios.get(url, {
     params: {
       sellToken,
-      buyToken, // use 'ETH' string para nativo
+      buyToken, // 'ETH' string p/ nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
@@ -58,7 +59,37 @@ export default function Home() {
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState<string>('')
 
+  // controles do fallback CoW
+  const [showCowCbBtc, setShowCowCbBtc] = useState(false)
+  const [showCowEth, setShowCowEth] = useState(false)
+  const [halfAmountWei, setHalfAmountWei] = useState<bigint>(0n)
+
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
+
+  const cowParamsCbBtc: CowSwapWidgetParams = useMemo(() => ({
+    appCode: 'VamosPraCrypto-50-50',
+    chainId: 8453,                        // Base
+    tradeType: 'swap',
+    sellToken: USDC,
+    buyToken: CBBTC,
+    // amount é string decimal com 6 casas para USDC
+    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
+    width: '100%',
+    height: '680px',
+    theme: { primaryColor: '#16a34a' },
+  }), [halfAmountWei])
+
+  const cowParamsEth: CowSwapWidgetParams = useMemo(() => ({
+    appCode: 'VamosPraCrypto-50-50',
+    chainId: 8453,                        // Base
+    tradeType: 'swap',
+    sellToken: USDC,
+    buyToken: 'ETH',                      // Widget entende ETH nativo
+    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
+    width: '100%',
+    height: '680px',
+    theme: { primaryColor: '#16a34a' },
+  }), [halfAmountWei])
 
   async function handleExecute() {
     try {
@@ -66,6 +97,8 @@ export default function Home() {
       if (chainId !== base.id) throw new Error('Troque a rede para Base.')
 
       setBusy(true)
+      setShowCowCbBtc(false)
+      setShowCowEth(false)
       setLog('Lendo saldo USDC on-chain...')
 
       const [dec, rawBal] = await Promise.all([
@@ -76,101 +109,57 @@ export default function Home() {
       if (rawBal === 0n) throw new Error('Sem USDC na Base.')
 
       const half = rawBal / 2n
+      setHalfAmountWei(half)
       setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
 
       setLog((p) => p + `\nBuscando cotações na 0x...`)
 
-      // Tenta cbBTC. Se 404 (sem rota), fazemos fallback p/ ETH-only
+      // tenta 0x para as duas pernas
       let qCb: ZeroExQuote | null = null
-      let qEthHalf: ZeroExQuote | null = null
-      let fallbackAllToEth = false
+      let qEth: ZeroExQuote | null = null
+
       try {
         qCb = await get0xQuoteBase({ sellToken: USDC, buyToken: CBBTC, sellAmountWei: half.toString(), takerAddress: address })
       } catch (err) {
         const ax = err as AxiosError<any>
         const code = ax.response?.status
-        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason
-        setLog((p) => p + `\n⚠️ cbBTC indisponível: ${code || ''} ${reason || ''}`)
-
-        if (code === 404) {
-          fallbackAllToEth = true
-        } else {
-          throw err
-        }
+        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
+        setLog((p) => p + `\n⚠️ cbBTC via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
+        // abre widget CoW para cbBTC
+        setShowCowCbBtc(true)
       }
 
-      if (!fallbackAllToEth) {
-        // metade → ETH
-        qEthHalf = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address })
+      try {
+        qEth = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address })
+      } catch (err) {
+        const ax = err as AxiosError<any>
+        const code = ax.response?.status
+        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
+        setLog((p) => p + `\n⚠️ ETH via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
+        // abre widget CoW para ETH
+        setShowCowEth(true)
       }
 
-      // Se não teve rota p/ cbBTC, converte 100% p/ ETH:
-      let qEthAll: ZeroExQuote | null = null
-      if (fallbackAllToEth) {
-        setLog((p) => p + `\nSem rota p/ cbBTC. Fallback: 100% do USDC → ETH.`)
-        qEthAll = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: rawBal.toString(), takerAddress: address })
+      // se 0x conseguiu, executa on-chain normalmente
+      if (qCb) {
+        setLog((p) => p + `\nEnviando swap USDC → cbBTC (0x)...`)
+        const hash = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
+        await publicClient.waitForTransactionReceipt({ hash })
+        setLog((p) => p + `\n✔️ cbBTC confirmado (0x).`)
+      }
+      if (qEth) {
+        setLog((p) => p + `\nEnviando swap USDC → ETH (0x)...`)
+        const hash = await walletClient.sendTransaction({ to: qEth.to, data: qEth.data, value: 0n, chain: base })
+        await publicClient.waitForTransactionReceipt({ hash })
+        setLog((p) => p + `\n✔️ ETH confirmado (0x).`)
       }
 
-      // Montar approvals por spender (somatório do que de fato será gasto em USDC)
-      const porSpender = new Map<string, bigint>()
-      const add = (q?: ZeroExQuote | null) => {
-        if (!q) return
-        const sp = q.allowanceTarget
-        if (!sp) return
-        const cur = porSpender.get(sp) ?? 0n
-        porSpender.set(sp, cur + BigInt(q.sellAmount))
-      }
-      add(qCb)
-      add(qEthHalf)
-      add(qEthAll)
-
-      for (const [spender, total] of porSpender) {
-        setLog((p) => p + `\nChecando allowance para ${spender}...`)
-        const allowance = await publicClient.readContract({
-          address: USDC,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [address, spender as `0x${string}`],
-        }) as bigint
-
-        if (allowance < total) {
-          setLog((p) => p + `\nAprovando USDC (${formatUnits(total, USDC_DECIMALS)}) para ${spender}...`)
-          const approveHash = await walletClient.writeContract({
-            address: USDC,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [spender as `0x${string}`, total],
-            chain: base,
-          })
-          await publicClient.waitForTransactionReceipt({ hash: approveHash })
-          setLog((p) => p + `\n✔️ Approve confirmado.`)
-        } else {
-          setLog((p) => p + `\nApprove já suficiente.`)
-        }
-      }
-
-      // Executar swaps conforme o cenário
-      if (!fallbackAllToEth) {
-        // 50% → cbBTC
-        setLog((p) => p + `\nEnviando swap USDC → cbBTC...`)
-        const tx1 = await walletClient.sendTransaction({ to: qCb!.to, data: qCb!.data, value: 0n, chain: base })
-        await publicClient.waitForTransactionReceipt({ hash: tx1 })
-        setLog((p) => p + `\n✔️ Swap cbBTC confirmado.`)
-
-        // 50% → ETH
-        setLog((p) => p + `\nEnviando swap USDC → ETH (nativo)...`)
-        const tx2 = await walletClient.sendTransaction({ to: qEthHalf!.to, data: qEthHalf!.data, value: 0n, chain: base })
-        await publicClient.waitForTransactionReceipt({ hash: tx2 })
-        setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
+      // Se alguma perna abriu widget, o usuário finaliza ali (ordem gasless).
+      if (showCowCbBtc || showCowEth) {
+        setLog((p) => p + `\n➡️ Para a(s) perna(s) sem rota na 0x, use o Widget da CoW abaixo.`)
       } else {
-        // 100% → ETH
-        setLog((p) => p + `\nEnviando swap 100% USDC → ETH...`)
-        const tx = await walletClient.sendTransaction({ to: qEthAll!.to, data: qEthAll!.data, value: 0n, chain: base })
-        await publicClient.waitForTransactionReceipt({ hash: tx })
-        setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
+        setLog((p) => p + `\n✅ Concluído!`)
       }
-
-      setLog((p) => p + `\n✅ Concluído!`)
     } catch (e: any) {
       const msg =
         e?.response?.data?.reason ||
@@ -186,7 +175,7 @@ export default function Home() {
   }
 
   return (
-    <main style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
+    <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
       <h1>Executar 50/50 Swap</h1>
 
       <ConnectButton />
@@ -219,8 +208,23 @@ export default function Home() {
             {log || 'Logs aparecerão aqui.'}
           </pre>
 
+          {/* Fallbacks CoW */}
+          {showCowCbBtc && (
+            <>
+              <h3 style={{ marginTop: 18 }}>Fallback CoW — USDC → cbBTC (50%)</h3>
+              <CowSwapWidget {...cowParamsCbBtc} />
+            </>
+          )}
+
+          {showCowEth && (
+            <>
+              <h3 style={{ marginTop: 18 }}>Fallback CoW — USDC → ETH (50%)</h3>
+              <CowSwapWidget {...cowParamsEth} />
+            </>
+          )}
+
           <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
-            Tenha ETH na Base para o gás. Slippage 0,5% (ajuste no código, se quiser).
+            Tenha ETH na Base para o gás nas transações via 0x. As ordens da CoW são gasless (assinatura off-chain).
           </p>
         </>
       ) : (
