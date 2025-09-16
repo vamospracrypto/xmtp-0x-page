@@ -1,16 +1,10 @@
+// pages/index.tsx
 import { useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, usePublicClient, useWalletClient, useBalance } from 'wagmi'
 import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
 import { erc20Abi, getAddress, formatUnits } from 'viem'
-import dynamic from 'next/dynamic'
-
-// Widget da CoW somente no client (evita erro no SSR)
-const CowSwapWidget = dynamic(
-  async () => (await import('@cowprotocol/widget-react')).CowSwapWidget,
-  { ssr: false }
-)
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
@@ -31,18 +25,16 @@ async function get0xQuoteBase(opts: {
   const { data } = await axios.get('https://base.api.0x.org/swap/v1/quote', {
     params: {
       sellToken,
-      buyToken,                      // 'ETH' (string) para nativo
+      buyToken,            // 'ETH' para nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
     },
   })
   return {
-    to: data.to,
-    data: data.data,
+    to: data.to, data: data.data,
     allowanceTarget: data.allowanceTarget || data.spender,
-    buyAmount: data.buyAmount,
-    sellAmount: data.sellAmount,
+    buyAmount: data.buyAmount, sellAmount: data.sellAmount,
   }
 }
 
@@ -53,35 +45,27 @@ export default function Home() {
 
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState('')
+
   const [showCowCbBtc, setShowCowCbBtc] = useState(false)
-  const [showCowEth, setShowCowEth] = useState(false)
+  const [showCowEth, setShowCowEth]   = useState(false)
   const [halfAmountWei, setHalfAmountWei] = useState<bigint>(0n)
 
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
 
-  const cowParamsCbBtc = useMemo(() => ({
-    appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,                       // Base
-    tradeType: 'swap',
-    sellToken: USDC,
-    buyToken: CBBTC,
-    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
-    width: '100%',
-    height: '680px',
-    theme: { primaryColor: '#16a34a' },
-  }), [halfAmountWei])
+  // URLs do widget CoW (iframe) – usam chain 8453 (Base) e tokens por endereço
+  const cowUrlCbBtc = useMemo(() => {
+    if (!halfAmountWei) return ''
+    const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS) // decimal
+    // Formato: https://swap.cow.fi/#/<chainId>/swap/<SELL>/<BUY>?sellAmount=<decimal>&theme=light
+    return `https://swap.cow.fi/#/8453/swap/${USDC}/${CBBTC}?sellAmount=${sellAmount}&theme=light&hideNetworkSelector=true`
+  }, [halfAmountWei])
 
-  const cowParamsEth = useMemo(() => ({
-    appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,
-    tradeType: 'swap',
-    sellToken: USDC,
-    buyToken: 'ETH',                     // ETH nativo no widget
-    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
-    width: '100%',
-    height: '680px',
-    theme: { primaryColor: '#16a34a' },
-  }), [halfAmountWei])
+  const cowUrlEth = useMemo(() => {
+    if (!halfAmountWei) return ''
+    const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS)
+    // Para ETH nativo, o CoW aceita 'ETH'
+    return `https://swap.cow.fi/#/8453/swap/${USDC}/ETH?sellAmount=${sellAmount}&theme=light&hideNetworkSelector=true`
+  }, [halfAmountWei])
 
   async function handleExecute() {
     try {
@@ -105,7 +89,7 @@ export default function Home() {
       setLog(p => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
       setLog(p => p + `\nBuscando cotações na 0x...`)
 
-      // tenta 0x para as duas pernas
+      // tenta 0x nas duas pernas
       let qCb: ZeroExQuote | null = null
       let qEth: ZeroExQuote | null = null
 
@@ -113,23 +97,17 @@ export default function Home() {
         qCb = await get0xQuoteBase({ sellToken: USDC, buyToken: CBBTC, sellAmountWei: half.toString(), takerAddress: address })
       } catch (err) {
         const ax = err as AxiosError<any>
-        const code = ax.response?.status
-        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
-        setLog(p => p + `\n⚠️ cbBTC via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
-        setShowCowCbBtc(true) // abre widget CoW
+        setLog(p => p + `\n⚠️ cbBTC via 0x falhou: ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}`)
+        setShowCowCbBtc(true)
       }
-
       try {
         qEth = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address })
       } catch (err) {
         const ax = err as AxiosError<any>
-        const code = ax.response?.status
-        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
-        setLog(p => p + `\n⚠️ ETH via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
-        setShowCowEth(true) // abre widget CoW
+        setLog(p => p + `\n⚠️ ETH via 0x falhou: ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}`)
+        setShowCowEth(true)
       }
 
-      // se 0x conseguiu, executa on-chain
       if (qCb) {
         setLog(p => p + `\nEnviando swap USDC → cbBTC (0x)...`)
         const hash = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
@@ -149,12 +127,7 @@ export default function Home() {
         setLog(p => p + `\n✅ Concluído!`)
       }
     } catch (e: any) {
-      const msg =
-        e?.response?.data?.reason ||
-        e?.response?.data?.validationErrors?.[0]?.reason ||
-        e?.shortMessage ||
-        e?.message ||
-        String(e)
+      const msg = e?.response?.data?.reason || e?.response?.data?.validationErrors?.[0]?.reason || e?.shortMessage || e?.message || String(e)
       setLog(p => p + `\n❌ Erro: ${msg}`)
       console.error(e)
     } finally {
@@ -177,17 +150,7 @@ export default function Home() {
           <button
             onClick={handleExecute}
             disabled={busy}
-            style={{
-              marginTop: 16,
-              padding: '12px 20px',
-              fontSize: 16,
-              fontWeight: 700,
-              borderRadius: 10,
-              background: '#16a34a',
-              color: '#fff',
-              border: 'none',
-              cursor: 'pointer',
-            }}
+            style={{ marginTop: 16, padding: '12px 20px', fontSize: 16, fontWeight: 700, borderRadius: 10, background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
             {busy ? 'Processando…' : 'Executar 50/50'}
           </button>
@@ -196,19 +159,31 @@ export default function Home() {
             {log || 'Logs aparecerão aqui.'}
           </pre>
 
-          {showCowCbBtc && (
+          {showCowCbBtc && cowUrlCbBtc && (
             <>
               <h3 style={{ marginTop: 18 }}>Fallback CoW — USDC → cbBTC (50%)</h3>
-              <CowSwapWidget {...cowParamsCbBtc} />
+              <iframe
+                src={cowUrlCbBtc}
+                style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone"
+              />
             </>
           )}
 
-          {showCowEth && (
+          {showCowEth && cowUrlEth && (
             <>
               <h3 style={{ marginTop: 18 }}>Fallback CoW — USDC → ETH (50%)</h3>
-              <CowSwapWidget {...cowParamsEth} />
+              <iframe
+                src={cowUrlEth}
+                style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone"
+              />
             </>
           )}
+
+          <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
+            Tenha ETH na Base para o gás nas transações via 0x. As ordens da CoW (abaixo) são gasless (assinatura off-chain).
+          </p>
         </>
       ) : (
         <p style={{ marginTop: 16 }}>Conecte sua carteira para continuar.</p>
