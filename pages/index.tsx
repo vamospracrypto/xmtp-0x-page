@@ -9,7 +9,7 @@ import {
 } from 'wagmi'
 import { base } from 'wagmi/chains'
 import axios from 'axios'
-import { erc20Abi } from 'viem/abis'
+import { erc20Abi } from 'viem'           // ⬅️ import corrigido
 import {
   getAddress,
   formatUnits,
@@ -29,7 +29,7 @@ type ZeroExQuote = {
 
 async function get0xQuoteBase(params: {
   sellToken: string
-  buyToken: string // ERC-20 addr OU 'ETH' (string p/ nativo)
+  buyToken: string
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
@@ -39,7 +39,7 @@ async function get0xQuoteBase(params: {
   const { data } = await axios.get(url, {
     params: {
       sellToken,
-      buyToken, // ATENÇÃO: use 'ETH' (string) para nativo
+      buyToken, // use 'ETH' (string) p/ nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
@@ -61,7 +61,6 @@ export default function Home() {
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState<string>('')
 
-  // só pra exibir na tela
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
 
   async function handleExecute() {
@@ -72,7 +71,6 @@ export default function Home() {
       setBusy(true)
       setLog('Lendo saldo USDC on-chain...')
 
-      // 1) Ler saldo/decimais direto do contrato
       const [dec, rawBal] = await Promise.all([
         publicClient.readContract({ address: USDC, abi: erc20Abi, functionName: 'decimals' }) as Promise<number>,
         publicClient.readContract({ address: USDC, abi: erc20Abi, functionName: 'balanceOf', args: [address] }) as Promise<bigint>,
@@ -83,16 +81,14 @@ export default function Home() {
       const half = rawBal / 2n
       setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
 
-      // 2) Quotes na 0x (USDC→cbBTC e USDC→ETH nativo)
       setLog((p) => p + `\nBuscando cotações na 0x...`)
       const [qCb, qEth] = await Promise.all([
         get0xQuoteBase({ sellToken: USDC, buyToken: CBBTC, sellAmountWei: half.toString(), takerAddress: address }),
-        get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address }), // 'ETH' string
+        get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address }),
       ])
       if (!qCb.allowanceTarget || !qEth.allowanceTarget)
         throw new Error('Spender/allowanceTarget ausente na resposta 0x.')
 
-      // 3) Approvals por spender (soma das duas pernas)
       const porSpender = new Map<string, bigint>()
       ;[qCb, qEth].forEach(q => {
         const sp = q.allowanceTarget!
@@ -125,25 +121,13 @@ export default function Home() {
         }
       }
 
-      // 4) Swap USDC → cbBTC
       setLog((p) => p + `\nEnviando swap USDC → cbBTC...`)
-      const tx1 = await walletClient.sendTransaction({
-        to: qCb.to,
-        data: qCb.data,
-        value: 0n, // ERC20→ERC20/ETH não precisa value
-        chain: base,
-      })
+      const tx1 = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
       await publicClient.waitForTransactionReceipt({ hash: tx1 })
       setLog((p) => p + `\n✔️ Swap cbBTC confirmado.`)
 
-      // 5) Swap USDC → ETH (nativo)
       setLog((p) => p + `\nEnviando swap USDC → ETH (nativo)...`)
-      const tx2 = await walletClient.sendTransaction({
-        to: qEth.to,
-        data: qEth.data,
-        value: 0n,
-        chain: base,
-      })
+      const tx2 = await walletClient.sendTransaction({ to: qEth.to, data: qEth.data, value: 0n, chain: base })
       await publicClient.waitForTransactionReceipt({ hash: tx2 })
       setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
 
