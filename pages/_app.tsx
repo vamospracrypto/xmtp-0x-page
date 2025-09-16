@@ -7,18 +7,16 @@ import type { AppProps } from 'next/app'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 
-// Crie um Project ID grátis em https://cloud.walletconnect.com
+// Configuração com seu Project ID válido da WalletConnect
 const wagmiConfig = getDefaultConfig({
   appName: 'VamosPraCrypto',
-  projectId: 'SUA_WALLETCONNECT_PROJECT_ID_AQUI',
+  projectId: 'de7c30118e4d4ec60397c81845e63ae9',
   chains: [base],
-  ssr: true, // habilita SSR no Wagmi/RainbowKit (ok para Next)
+  ssr: true,
 })
 
 export default function App({ Component, pageProps }: AppProps) {
-  // garante um QueryClient único por mount
   const [queryClient] = useState(() => new QueryClient())
-
   return (
     <QueryClientProvider client={queryClient}>
       <WagmiConfig config={wagmiConfig}>
