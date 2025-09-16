@@ -8,12 +8,9 @@ import {
   useBalance,
 } from 'wagmi'
 import { base } from 'wagmi/chains'
-import axios from 'axios'
-import { erc20Abi } from 'viem'           // ⬅️ import corrigido
-import {
-  getAddress,
-  formatUnits,
-} from 'viem'
+import axios, { AxiosError } from 'axios'
+import { erc20Abi } from 'viem'
+import { getAddress, formatUnits } from 'viem'
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
@@ -27,19 +24,19 @@ type ZeroExQuote = {
   sellAmount: string
 }
 
-async function get0xQuoteBase(params: {
+async function get0xQuoteBase(opts: {
   sellToken: string
-  buyToken: string
+  buyToken: string // ERC-20 ou 'ETH'
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
 }): Promise<ZeroExQuote> {
-  const { sellToken, buyToken, sellAmountWei, takerAddress, slippagePerc = 0.005 } = params
+  const { sellToken, buyToken, sellAmountWei, takerAddress, slippagePerc = 0.005 } = opts
   const url = 'https://base.api.0x.org/swap/v1/quote'
   const { data } = await axios.get(url, {
     params: {
       sellToken,
-      buyToken, // use 'ETH' (string) p/ nativo
+      buyToken, // use 'ETH' string para nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
@@ -82,19 +79,50 @@ export default function Home() {
       setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
 
       setLog((p) => p + `\nBuscando cotações na 0x...`)
-      const [qCb, qEth] = await Promise.all([
-        get0xQuoteBase({ sellToken: USDC, buyToken: CBBTC, sellAmountWei: half.toString(), takerAddress: address }),
-        get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address }),
-      ])
-      if (!qCb.allowanceTarget || !qEth.allowanceTarget)
-        throw new Error('Spender/allowanceTarget ausente na resposta 0x.')
 
+      // Tenta cbBTC. Se 404 (sem rota), fazemos fallback p/ ETH-only
+      let qCb: ZeroExQuote | null = null
+      let qEthHalf: ZeroExQuote | null = null
+      let fallbackAllToEth = false
+      try {
+        qCb = await get0xQuoteBase({ sellToken: USDC, buyToken: CBBTC, sellAmountWei: half.toString(), takerAddress: address })
+      } catch (err) {
+        const ax = err as AxiosError<any>
+        const code = ax.response?.status
+        const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason
+        setLog((p) => p + `\n⚠️ cbBTC indisponível: ${code || ''} ${reason || ''}`)
+
+        if (code === 404) {
+          fallbackAllToEth = true
+        } else {
+          throw err
+        }
+      }
+
+      if (!fallbackAllToEth) {
+        // metade → ETH
+        qEthHalf = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: half.toString(), takerAddress: address })
+      }
+
+      // Se não teve rota p/ cbBTC, converte 100% p/ ETH:
+      let qEthAll: ZeroExQuote | null = null
+      if (fallbackAllToEth) {
+        setLog((p) => p + `\nSem rota p/ cbBTC. Fallback: 100% do USDC → ETH.`)
+        qEthAll = await get0xQuoteBase({ sellToken: USDC, buyToken: 'ETH', sellAmountWei: rawBal.toString(), takerAddress: address })
+      }
+
+      // Montar approvals por spender (somatório do que de fato será gasto em USDC)
       const porSpender = new Map<string, bigint>()
-      ;[qCb, qEth].forEach(q => {
-        const sp = q.allowanceTarget!
+      const add = (q?: ZeroExQuote | null) => {
+        if (!q) return
+        const sp = q.allowanceTarget
+        if (!sp) return
         const cur = porSpender.get(sp) ?? 0n
         porSpender.set(sp, cur + BigInt(q.sellAmount))
-      })
+      }
+      add(qCb)
+      add(qEthHalf)
+      add(qEthAll)
 
       for (const [spender, total] of porSpender) {
         setLog((p) => p + `\nChecando allowance para ${spender}...`)
@@ -121,15 +149,26 @@ export default function Home() {
         }
       }
 
-      setLog((p) => p + `\nEnviando swap USDC → cbBTC...`)
-      const tx1 = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
-      await publicClient.waitForTransactionReceipt({ hash: tx1 })
-      setLog((p) => p + `\n✔️ Swap cbBTC confirmado.`)
+      // Executar swaps conforme o cenário
+      if (!fallbackAllToEth) {
+        // 50% → cbBTC
+        setLog((p) => p + `\nEnviando swap USDC → cbBTC...`)
+        const tx1 = await walletClient.sendTransaction({ to: qCb!.to, data: qCb!.data, value: 0n, chain: base })
+        await publicClient.waitForTransactionReceipt({ hash: tx1 })
+        setLog((p) => p + `\n✔️ Swap cbBTC confirmado.`)
 
-      setLog((p) => p + `\nEnviando swap USDC → ETH (nativo)...`)
-      const tx2 = await walletClient.sendTransaction({ to: qEth.to, data: qEth.data, value: 0n, chain: base })
-      await publicClient.waitForTransactionReceipt({ hash: tx2 })
-      setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
+        // 50% → ETH
+        setLog((p) => p + `\nEnviando swap USDC → ETH (nativo)...`)
+        const tx2 = await walletClient.sendTransaction({ to: qEthHalf!.to, data: qEthHalf!.data, value: 0n, chain: base })
+        await publicClient.waitForTransactionReceipt({ hash: tx2 })
+        setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
+      } else {
+        // 100% → ETH
+        setLog((p) => p + `\nEnviando swap 100% USDC → ETH...`)
+        const tx = await walletClient.sendTransaction({ to: qEthAll!.to, data: qEthAll!.data, value: 0n, chain: base })
+        await publicClient.waitForTransactionReceipt({ hash: tx })
+        setLog((p) => p + `\n✔️ Swap ETH confirmado.`)
+      }
 
       setLog((p) => p + `\n✅ Concluído!`)
     } catch (e: any) {
