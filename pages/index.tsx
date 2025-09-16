@@ -11,7 +11,13 @@ import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
 import { erc20Abi } from 'viem'
 import { getAddress, formatUnits } from 'viem'
-import { CowSwapWidget, CowSwapWidgetParams } from '@cowprotocol/widget-react'
+import dynamic from 'next/dynamic'
+
+// IMPORTA O WIDGET SEM SSR (evita erro no build)
+const CowSwapWidget = dynamic(
+  async () => (await import('@cowprotocol/widget-react')).CowSwapWidget,
+  { ssr: false }
+)
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
@@ -27,7 +33,7 @@ type ZeroExQuote = {
 
 async function get0xQuoteBase(opts: {
   sellToken: string
-  buyToken: string // ERC20 ou 'ETH'
+  buyToken: string // ERC20 addr ou 'ETH'
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
@@ -37,7 +43,7 @@ async function get0xQuoteBase(opts: {
   const { data } = await axios.get(url, {
     params: {
       sellToken,
-      buyToken, // 'ETH' string p/ nativo
+      buyToken, // 'ETH' string = nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
@@ -66,25 +72,24 @@ export default function Home() {
 
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
 
-  const cowParamsCbBtc: CowSwapWidgetParams = useMemo(() => ({
+  const cowParamsCbBtc = useMemo(() => ({
     appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,                        // Base
+    chainId: 8453,                 // Base
     tradeType: 'swap',
     sellToken: USDC,
     buyToken: CBBTC,
-    // amount é string decimal com 6 casas para USDC
-    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
+    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined, // decimal string
     width: '100%',
     height: '680px',
     theme: { primaryColor: '#16a34a' },
   }), [halfAmountWei])
 
-  const cowParamsEth: CowSwapWidgetParams = useMemo(() => ({
+  const cowParamsEth = useMemo(() => ({
     appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,                        // Base
+    chainId: 8453,                 // Base
     tradeType: 'swap',
     sellToken: USDC,
-    buyToken: 'ETH',                      // Widget entende ETH nativo
+    buyToken: 'ETH',               // widget aceita 'ETH' p/ nativo
     sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
     width: '100%',
     height: '680px',
@@ -111,7 +116,6 @@ export default function Home() {
       const half = rawBal / 2n
       setHalfAmountWei(half)
       setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
-
       setLog((p) => p + `\nBuscando cotações na 0x...`)
 
       // tenta 0x para as duas pernas
@@ -125,8 +129,7 @@ export default function Home() {
         const code = ax.response?.status
         const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
         setLog((p) => p + `\n⚠️ cbBTC via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
-        // abre widget CoW para cbBTC
-        setShowCowCbBtc(true)
+        setShowCowCbBtc(true) // abre widget CoW
       }
 
       try {
@@ -136,11 +139,10 @@ export default function Home() {
         const code = ax.response?.status
         const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
         setLog((p) => p + `\n⚠️ ETH via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
-        // abre widget CoW para ETH
-        setShowCowEth(true)
+        setShowCowEth(true) // abre widget CoW
       }
 
-      // se 0x conseguiu, executa on-chain normalmente
+      // se 0x conseguiu, executa normalmente
       if (qCb) {
         setLog((p) => p + `\nEnviando swap USDC → cbBTC (0x)...`)
         const hash = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
@@ -154,7 +156,6 @@ export default function Home() {
         setLog((p) => p + `\n✔️ ETH confirmado (0x).`)
       }
 
-      // Se alguma perna abriu widget, o usuário finaliza ali (ordem gasless).
       if (showCowCbBtc || showCowEth) {
         setLog((p) => p + `\n➡️ Para a(s) perna(s) sem rota na 0x, use o Widget da CoW abaixo.`)
       } else {
@@ -208,7 +209,6 @@ export default function Home() {
             {log || 'Logs aparecerão aqui.'}
           </pre>
 
-          {/* Fallbacks CoW */}
           {showCowCbBtc && (
             <>
               <h3 style={{ marginTop: 18 }}>Fallback CoW — USDC → cbBTC (50%)</h3>
