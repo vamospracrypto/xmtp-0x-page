@@ -1,19 +1,12 @@
-// pages/index.tsx
 import { useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import {
-  useAccount,
-  usePublicClient,
-  useWalletClient,
-  useBalance,
-} from 'wagmi'
+import { useAccount, usePublicClient, useWalletClient, useBalance } from 'wagmi'
 import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
-import { erc20Abi } from 'viem'
-import { getAddress, formatUnits } from 'viem'
+import { erc20Abi, getAddress, formatUnits } from 'viem'
 import dynamic from 'next/dynamic'
 
-// IMPORTA O WIDGET SEM SSR (evita erro no build)
+// Widget da CoW somente no client (evita erro no SSR)
 const CowSwapWidget = dynamic(
   async () => (await import('@cowprotocol/widget-react')).CowSwapWidget,
   { ssr: false }
@@ -32,29 +25,24 @@ type ZeroExQuote = {
 }
 
 async function get0xQuoteBase(opts: {
-  sellToken: string
-  buyToken: string // ERC20 addr ou 'ETH'
-  sellAmountWei: string
-  takerAddress: string
-  slippagePerc?: number
+  sellToken: string; buyToken: string; sellAmountWei: string; takerAddress: string; slippagePerc?: number
 }): Promise<ZeroExQuote> {
   const { sellToken, buyToken, sellAmountWei, takerAddress, slippagePerc = 0.005 } = opts
-  const url = 'https://base.api.0x.org/swap/v1/quote'
-  const { data } = await axios.get(url, {
+  const { data } = await axios.get('https://base.api.0x.org/swap/v1/quote', {
     params: {
       sellToken,
-      buyToken, // 'ETH' string = nativo
+      buyToken,                      // 'ETH' (string) para nativo
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
     },
   })
   return {
-    to: data.to as `0x${string}`,
-    data: data.data as `0x${string}`,
-    allowanceTarget: (data.allowanceTarget || data.spender) as `0x${string}`,
-    buyAmount: data.buyAmount as string,
-    sellAmount: data.sellAmount as string,
+    to: data.to,
+    data: data.data,
+    allowanceTarget: data.allowanceTarget || data.spender,
+    buyAmount: data.buyAmount,
+    sellAmount: data.sellAmount,
   }
 }
 
@@ -62,10 +50,9 @@ export default function Home() {
   const { address, chainId, isConnected } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
-  const [busy, setBusy] = useState(false)
-  const [log, setLog] = useState<string>('')
 
-  // controles do fallback CoW
+  const [busy, setBusy] = useState(false)
+  const [log, setLog] = useState('')
   const [showCowCbBtc, setShowCowCbBtc] = useState(false)
   const [showCowEth, setShowCowEth] = useState(false)
   const [halfAmountWei, setHalfAmountWei] = useState<bigint>(0n)
@@ -74,11 +61,11 @@ export default function Home() {
 
   const cowParamsCbBtc = useMemo(() => ({
     appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,                 // Base
+    chainId: 8453,                       // Base
     tradeType: 'swap',
     sellToken: USDC,
     buyToken: CBBTC,
-    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined, // decimal string
+    sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
     width: '100%',
     height: '680px',
     theme: { primaryColor: '#16a34a' },
@@ -86,10 +73,10 @@ export default function Home() {
 
   const cowParamsEth = useMemo(() => ({
     appCode: 'VamosPraCrypto-50-50',
-    chainId: 8453,                 // Base
+    chainId: 8453,
     tradeType: 'swap',
     sellToken: USDC,
-    buyToken: 'ETH',               // widget aceita 'ETH' p/ nativo
+    buyToken: 'ETH',                     // ETH nativo no widget
     sellAmount: halfAmountWei ? formatUnits(halfAmountWei, USDC_DECIMALS) : undefined,
     width: '100%',
     height: '680px',
@@ -115,8 +102,8 @@ export default function Home() {
 
       const half = rawBal / 2n
       setHalfAmountWei(half)
-      setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
-      setLog((p) => p + `\nBuscando cotações na 0x...`)
+      setLog(p => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
+      setLog(p => p + `\nBuscando cotações na 0x...`)
 
       // tenta 0x para as duas pernas
       let qCb: ZeroExQuote | null = null
@@ -128,7 +115,7 @@ export default function Home() {
         const ax = err as AxiosError<any>
         const code = ax.response?.status
         const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
-        setLog((p) => p + `\n⚠️ cbBTC via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
+        setLog(p => p + `\n⚠️ cbBTC via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
         setShowCowCbBtc(true) // abre widget CoW
       }
 
@@ -138,28 +125,28 @@ export default function Home() {
         const ax = err as AxiosError<any>
         const code = ax.response?.status
         const reason = ax.response?.data?.reason || ax.response?.data?.validationErrors?.[0]?.reason || ax.message
-        setLog((p) => p + `\n⚠️ ETH via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
+        setLog(p => p + `\n⚠️ ETH via 0x falhou: ${code ?? ''} ${reason ?? ''}`)
         setShowCowEth(true) // abre widget CoW
       }
 
-      // se 0x conseguiu, executa normalmente
+      // se 0x conseguiu, executa on-chain
       if (qCb) {
-        setLog((p) => p + `\nEnviando swap USDC → cbBTC (0x)...`)
+        setLog(p => p + `\nEnviando swap USDC → cbBTC (0x)...`)
         const hash = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
         await publicClient.waitForTransactionReceipt({ hash })
-        setLog((p) => p + `\n✔️ cbBTC confirmado (0x).`)
+        setLog(p => p + `\n✔️ cbBTC confirmado (0x).`)
       }
       if (qEth) {
-        setLog((p) => p + `\nEnviando swap USDC → ETH (0x)...`)
+        setLog(p => p + `\nEnviando swap USDC → ETH (0x)...`)
         const hash = await walletClient.sendTransaction({ to: qEth.to, data: qEth.data, value: 0n, chain: base })
         await publicClient.waitForTransactionReceipt({ hash })
-        setLog((p) => p + `\n✔️ ETH confirmado (0x).`)
+        setLog(p => p + `\n✔️ ETH confirmado (0x).`)
       }
 
       if (showCowCbBtc || showCowEth) {
-        setLog((p) => p + `\n➡️ Para a(s) perna(s) sem rota na 0x, use o Widget da CoW abaixo.`)
+        setLog(p => p + `\n➡️ Para a(s) perna(s) sem rota na 0x, use o Widget da CoW abaixo.`)
       } else {
-        setLog((p) => p + `\n✅ Concluído!`)
+        setLog(p => p + `\n✅ Concluído!`)
       }
     } catch (e: any) {
       const msg =
@@ -168,7 +155,7 @@ export default function Home() {
         e?.shortMessage ||
         e?.message ||
         String(e)
-      setLog((p) => p + `\n❌ Erro: ${msg}`)
+      setLog(p => p + `\n❌ Erro: ${msg}`)
       console.error(e)
     } finally {
       setBusy(false)
@@ -222,10 +209,6 @@ export default function Home() {
               <CowSwapWidget {...cowParamsEth} />
             </>
           )}
-
-          <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
-            Tenha ETH na Base para o gás nas transações via 0x. As ordens da CoW são gasless (assinatura off-chain).
-          </p>
         </>
       ) : (
         <p style={{ marginTop: 16 }}>Conecte sua carteira para continuar.</p>
