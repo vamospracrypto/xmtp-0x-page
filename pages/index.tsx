@@ -5,6 +5,34 @@ import { useAccount, usePublicClient, useWalletClient, useBalance } from 'wagmi'
 import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
 import { erc20Abi, formatUnits, getAddress } from 'viem'
+import Image from "next/image";
+
+export default function HomePage() {
+  return (
+    <div style={{ textAlign: "center", padding: "20px" }}>
+      {/* LOGO RESPONSIVO */}
+      <div style={{ maxWidth: "200px", margin: "0 auto" }}>
+        <Image
+          src="/vamos-pra-crypto-logo.png"
+          alt="Vamos Pra Crypto"
+          width={500}   // tamanho base
+          height={500}  // mantém proporção
+          style={{
+            width: "100%",   // ocupa até 100% do container
+            height: "auto",  // ajusta automaticamente
+          }}
+          priority
+        />
+      </div>
+
+      {/* TÍTULO */}
+      <h1 style={{ marginTop: "20px" }}>Executar 50/50 Swap</h1>
+
+      {/* resto da página */}
+    </div>
+  );
+}
+
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
