@@ -5,34 +5,7 @@ import { useAccount, usePublicClient, useWalletClient, useBalance } from 'wagmi'
 import { base } from 'wagmi/chains'
 import axios, { AxiosError } from 'axios'
 import { erc20Abi, formatUnits, getAddress } from 'viem'
-import Image from "next/image";
-
-export default function HomePage() {
-  return (
-    <div style={{ textAlign: "center", padding: "20px" }}>
-      {/* LOGO RESPONSIVO */}
-      <div style={{ maxWidth: "200px", margin: "0 auto" }}>
-        <Image
-          src="/vamos-pra-crypto-logo.png"
-          alt="Vamos Pra Crypto"
-          width={500}   // tamanho base
-          height={500}  // mantém proporção
-          style={{
-            width: "100%",   // ocupa até 100% do container
-            height: "auto",  // ajusta automaticamente
-          }}
-          priority
-        />
-      </div>
-
-      {/* TÍTULO */}
-      <h1 style={{ marginTop: "20px" }}>Executar 50/50 Swap</h1>
-
-      {/* resto da página */}
-    </div>
-  );
-}
-
+import Image from 'next/image'
 
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
@@ -58,7 +31,7 @@ async function get0xQuoteBase(opts: {
   const { data } = await axios.get('https://base.api.0x.org/swap/v1/quote', {
     params: {
       sellToken,
-      buyToken, // 'ETH' string para nativo
+      buyToken,
       sellAmount: sellAmountWei,
       takerAddress,
       slippagePercentage: slippagePerc.toString(),
@@ -80,15 +53,9 @@ export default function Home() {
 
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState('')
-
-  // controle de CoW (principal)
   const [showCow, setShowCow] = useState(false)
   const [halfAmountWei, setHalfAmountWei] = useState<bigint>(0n)
-
-  // fallback 0x
   const [enableZeroX, setEnableZeroX] = useState(false)
-
-  // saldos
   const [loadingBalances, setLoadingBalances] = useState(false)
   const [balances, setBalances] = useState<
     { symbol: string; name: string; contract: string; balance: string }[]
@@ -96,16 +63,15 @@ export default function Home() {
 
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
 
-  // URLs do CoW widget (iframe)
   const cowUrlCbBtc = useMemo(() => {
     if (!halfAmountWei) return ''
     const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS)
-    return `https://swap.cow.fi/#/8453/swap/${USDC}/${CBBTC}?sellAmount=${sellAmount}&theme=light&hideNetworkSelector=true`
+    return `https://swap.cow.fi/#/8453/swap/${USDC}/${CBBTC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
   }, [halfAmountWei])
   const cowUrlEth = useMemo(() => {
     if (!halfAmountWei) return ''
     const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS)
-    return `https://swap.cow.fi/#/8453/swap/${USDC}/ETH?sellAmount=${sellAmount}&theme=light&hideNetworkSelector=true`
+    return `https://swap.cow.fi/#/8453/swap/${USDC}/ETH?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
   }, [halfAmountWei])
 
   async function prepareAmountsAndShowCow() {
@@ -140,7 +106,7 @@ export default function Home() {
     try {
       setBusy(true)
       await prepareAmountsAndShowCow()
-      setEnableZeroX(true) // habilita botão de fallback 0x
+      setEnableZeroX(true)
       setLog((p) => p + `\nWidgets da CoW carregados. Se preferir execução automática, use o fallback 0x abaixo.`)
     } catch (e: any) {
       const msg = e?.shortMessage || e?.message || String(e)
@@ -150,7 +116,6 @@ export default function Home() {
     }
   }
 
-  // Fallback 0x (execução automática)
   async function tryZeroXAuto() {
     try {
       if (!address || !publicClient || !walletClient) return
@@ -158,10 +123,8 @@ export default function Home() {
       setBusy(true)
       setLog((p) => p + `\nBuscando rotas na 0x...`)
 
-      // se ainda não calculamos half, calcula agora
       if (halfAmountWei === 0n) await prepareAmountsAndShowCow()
 
-      // 2 quotes (USDC->cbBTC e USDC->ETH)
       let qCb: ZeroExQuote | null = null
       let qEth: ZeroExQuote | null = null
 
@@ -189,7 +152,6 @@ export default function Home() {
         setLog((p) => p + `\n⚠️ 0x ETH falhou: ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}`)
       }
 
-      // Approvals por spender (se necessário)
       const porSpender = new Map<string, bigint>()
       const add = (q?: ZeroExQuote | null) => {
         if (!q?.allowanceTarget) return
@@ -220,7 +182,6 @@ export default function Home() {
         }
       }
 
-      // Executa o que tiver rota
       if (qCb) {
         setLog((p) => p + `\nEnviando swap USDC → cbBTC (0x)...`)
         const h = await walletClient.sendTransaction({ to: qCb.to, data: qCb.data, value: 0n, chain: base })
@@ -242,79 +203,26 @@ export default function Home() {
     }
   }
 
-  // Mostrar saldos via Alchemy (Base)
-  async function fetchAllBalances() {
-    try {
-      if (!address) return
-      setLoadingBalances(true)
-      const list: { symbol: string; name: string; contract: string; balance: string }[] = []
-
-      // ETH
-      const ethHex = await publicClient!.request({ method: 'eth_getBalance', params: [address, 'latest'] })
-      const eth = formatUnits(BigInt(ethHex), 18)
-      list.push({ symbol: 'ETH', name: 'Ether', contract: 'native', balance: eth })
-
-      if (!ALCHEMY_KEY) {
-        setBalances(list)
-        return
-      }
-
-      const rpc = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`
-
-      // ERC-20 balances
-      const { data: tb } = await axios.post(rpc, {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'alchemy_getTokenBalances',
-        params: [address, 'erc20'],
-      })
-
-      const tokenBalances: { contractAddress: string; tokenBalance: string }[] =
-        tb?.result?.tokenBalances || []
-
-      // pega metadata p/ cada token e formata apenas os que têm saldo > 0
-      for (const t of tokenBalances) {
-        try {
-          const bal = BigInt(t.tokenBalance || '0x0')
-          if (bal === 0n) continue
-
-          const { data: md } = await axios.post(rpc, {
-            jsonrpc: '2.0',
-            id: 2,
-            method: 'alchemy_getTokenMetadata',
-            params: [t.contractAddress],
-          })
-          const sym = md?.result?.symbol || 'UNK'
-          const name = md?.result?.name || 'Unknown'
-          const dec = Number(md?.result?.decimals ?? 18)
-          list.push({
-            symbol: sym,
-            name,
-            contract: t.contractAddress,
-            balance: formatUnits(bal, dec),
-          })
-        } catch {
-          // ignora token com erro de metadata
-        }
-      }
-
-      // ordena por valor string desc (só para visual)
-      setBalances(list.sort((a, b) => Number(b.balance) - Number(a.balance)))
-    } catch (e: any) {
-      setLog((p) => p + `\n❌ Erro ao buscar saldos: ${e?.message || String(e)}`)
-    } finally {
-      setLoadingBalances(false)
-    }
-  }
-
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto', padding: 16 }}>
-      <h1>Executar 50/50 Swap</h1>
+    <main style={{ maxWidth: 900, margin: '40px auto', padding: 16, textAlign: 'center', background: '#000', color: '#fff', borderRadius: 12 }}>
+      
+      {/* Logo no topo */}
+      <div style={{ marginBottom: 20 }}>
+        <Image
+          src="/logo-vamos.png"  // coloque o arquivo em /public/logo-vamos.png
+          alt="Vamos Pra Crypto"
+          width={160}
+          height={160}
+          priority
+        />
+      </div>
+
+      <h1 style={{ color: '#4ade80' }}>Executar 50/50 Swap</h1>
       <ConnectButton />
 
       {isConnected ? (
         <>
-          <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
             <button
               onClick={handleExecuteCowFirst}
               disabled={busy}
@@ -331,51 +239,38 @@ export default function Home() {
             >
               Fallback 0x (automático)
             </button>
-
-            <button
-              onClick={fetchAllBalances}
-              disabled={loadingBalances}
-              style={{ padding: '10px 16px', fontWeight: 700, borderRadius: 10, background: '#2563eb', color: '#fff', border: 'none' }}
-            >
-              {loadingBalances ? 'Carregando…' : 'Mostrar saldos (Base)'}
-            </button>
           </div>
 
           <p style={{ marginTop: 12 }}>
             Saldo em USDC: {usdcBalUi ? `${usdcBalUi.formatted} ${usdcBalUi.symbol}` : '-'}
           </p>
 
-          <pre style={{ background: '#0b0b0b', color: '#a7f3d0', padding: 12, marginTop: 16, whiteSpace: 'pre-wrap' }}>
+          <pre style={{ background: '#0b0b0b', color: '#a7f3d0', padding: 12, marginTop: 16, whiteSpace: 'pre-wrap', textAlign: 'left' }}>
             {log || 'Logs aparecerão aqui.'}
           </pre>
 
-          {/* Widgets da CoW (principal) */}
           {showCow && halfAmountWei > 0n && (
             <>
-              <h3 style={{ marginTop: 18 }}>CoW — USDC → cbBTC (50%)</h3>
+              <h3 style={{ marginTop: 18, color: '#38bdf8' }}>CoW — USDC → cbBTC (50%)</h3>
               <iframe
                 src={cowUrlCbBtc}
                 style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
                 allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone"
               />
-              <h3 style={{ marginTop: 18 }}>CoW — USDC → ETH (50%)</h3>
+              <h3 style={{ marginTop: 18, color: '#38bdf8' }}>CoW — USDC → ETH (50%)</h3>
               <iframe
                 src={cowUrlEth}
                 style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
                 allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone"
               />
-              <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
-                As ordens da CoW são gasless (assinatura off-chain com proteção MEV). Se preferir execução automática on-chain, use o fallback 0x.
-              </p>
             </>
           )}
 
-          {/* Saldos listados */}
           {balances.length > 0 && (
             <div style={{ marginTop: 24 }}>
-              <h3>Saldos na Base</h3>
+              <h3 style={{ color: '#fbbf24' }}>Saldos na Base</h3>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff' }}>
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', padding: 8 }}>Token</th>
@@ -386,7 +281,7 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {balances.map((b, i) => (
-                      <tr key={b.contract + i} style={{ borderTop: '1px solid #e5e7eb' }}>
+                      <tr key={b.contract + i} style={{ borderTop: '1px solid #333' }}>
                         <td style={{ padding: 8 }}>{b.name}</td>
                         <td style={{ padding: 8 }}>{b.symbol}</td>
                         <td style={{ padding: 8 }}>{b.balance}</td>
@@ -396,11 +291,6 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
-              {!ALCHEMY_KEY && (
-                <p style={{ marginTop: 8, fontSize: 12, color: '#b91c1c' }}>
-                  Dica: adicione <code>NEXT_PUBLIC_ALCHEMY_KEY</code> na Vercel para ver todos os ERC-20. Sem a chave, mostro apenas ETH.
-                </p>
-              )}
             </div>
           )}
         </>
