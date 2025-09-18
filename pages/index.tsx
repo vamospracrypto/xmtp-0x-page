@@ -72,7 +72,7 @@ try {
 if (!address || !publicClient || !walletClient) return
 if (chainId !== [base.id](http://base.id/)) throw new Error('Troque a rede para Base.')
 
-```
+``
   setBusy(true)
   setShowCowCbBtc(false)
   setShowCowEth(false)
@@ -135,7 +135,7 @@ if (chainId !== [base.id](http://base.id/)) throw new Error('Troque a rede para 
   setBusy(false)
 }
 
-```
+``
 
 }
 
