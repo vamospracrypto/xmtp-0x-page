@@ -17,31 +17,32 @@ import type { AppProps } from 'next/app'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 
-const projectId = 'de7c30118e4d4ec60397c81845e63ae9' // WalletConnect
+const projectId = 'de7c30118e4d4ec60397c81845e63ae9' // seu WalletConnect Project ID
 const appName = 'VamosPraCrypto'
 const chains = [base]
 
-// 🔧 Conectores explícitos (garante MetaMask e Browser Wallet/Injected)
+// ✅ Passe as fábricas (funções), não chame elas aqui.
+// O appName e projectId vão no 2º argumento.
 const connectors = connectorsForWallets(
   [
     {
       groupName: 'Recommended',
       wallets: [
-        metaMaskWallet({ projectId, chains }),
-        injectedWallet({ chains, shimDisconnect: true }), // aparece como "Browser Wallet" quando apropriado
-        coinbaseWallet({ appName, chains }),
-        walletConnectWallet({ projectId, chains }),
+        metaMaskWallet,
+        injectedWallet,       // aparece como "Browser Wallet" quando apropriado
+        coinbaseWallet,
+        walletConnectWallet,
       ],
     },
   ],
-  { appName, projectId } // <- ESTE é o 2º argumento que estava faltando
+  { appName, projectId }
 )
 
-// Transports (RPC). Pode trocar por seu RPC/Alchemy se quiser.
+// Transports (RPC). Troque por seu RPC/Alchemy se quiser.
 const wagmiConfig = createConfig({
   chains,
   transports: {
-    [base.id]: http(),
+    [base.id]: http(), // ou http(`https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`)
   },
   connectors,
   ssr: true,
