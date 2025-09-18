@@ -19,10 +19,11 @@ import { useState } from 'react'
 
 const projectId = 'de7c30118e4d4ec60397c81845e63ae9' // seu WalletConnect Project ID
 const appName = 'VamosPraCrypto'
-const chains = [base]
 
-// ✅ Passe as fábricas (funções), não chame elas aqui.
-// O appName e projectId vão no 2º argumento.
+// ✅ O segredo: defina como tuplo readonly
+const chains = [base] as const
+
+// Conectores (garante MetaMask e Browser Wallet/Injected)
 const connectors = connectorsForWallets(
   [
     {
@@ -38,9 +39,9 @@ const connectors = connectorsForWallets(
   { appName, projectId }
 )
 
-// Transports (RPC). Troque por seu RPC/Alchemy se quiser.
+// Transports (RPC) – use o seu RPC/Alchemy se quiser
 const wagmiConfig = createConfig({
-  chains,
+  chains, // agora é readonly [base]
   transports: {
     [base.id]: http(), // ou http(`https://base-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`)
   },
