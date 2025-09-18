@@ -72,7 +72,6 @@ try {
 if (!address || !publicClient || !walletClient) return
 if (chainId !== [base.id](http://base.id/)) throw new Error('Troque a rede para Base.')
 
-``
   setBusy(true)
   setShowCowCbBtc(false)
   setShowCowEth(false)
@@ -135,7 +134,7 @@ if (chainId !== [base.id](http://base.id/)) throw new Error('Troque a rede para 
   setBusy(false)
 }
 
-``
+
 
 }
 
@@ -143,7 +142,7 @@ return (
 <main style={{ maxWidth: 820, margin: '40px auto', padding: 16 }}>
 <h1>Executar 50/50 Swap</h1>
 
-```
+
   <ConnectButton />
 
   {isConnected ? (
@@ -195,7 +194,7 @@ return (
   )}
 </main>
 
-```
+
 
 )
 }
