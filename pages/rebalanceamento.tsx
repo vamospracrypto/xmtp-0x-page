@@ -16,10 +16,6 @@ import {
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
 
-// Limiares mínimos para evitar 404 de “valor muito baixo”
-const MIN_ETH_WEI   = 5_000_000_000_000_000n; // 0.005 ETH
-const MIN_CBBTC_WEI = 50_000n;                // ajuste conforme decimais do cbBTC (18). Aqui ~5e-14 cbBTC (bem baixo, aumente se necessário)
-
 // CoW API (Base)
 const COW_API = 'https://api.cow.fi/base-mainnet/api/v1'
 // ETH “nativo” para a CoW (aceito pela API)
@@ -246,16 +242,6 @@ export default function Rebalanceamento() {
   async function swapWith0x(sellToken: string, amountWei: bigint, label: string) {
     if (!address || !publicClient || !walletClient) return
 
-    // proteção de mínimo também no fallback
-    if (sellToken === 'ETH' && amountWei < MIN_ETH_WEI) {
-      setLog(p => p + `\n⏭️  0x pulado (${label}): valor menor que o mínimo (${formatUnits(MIN_ETH_WEI, 18)} ETH).`)
-      return
-    }
-    if (sellToken !== 'ETH' && amountWei < MIN_CBBTC_WEI) {
-      setLog(p => p + `\n⏭️  0x pulado (${label}): valor muito pequeno.`)
-      return
-    }
-
     try {
       const quote = await get0xQuoteBase({
         sellToken,
@@ -306,60 +292,56 @@ export default function Rebalanceamento() {
       if (chainId !== base.id) throw new Error('Troque a rede para Base.')
 
       setBusy(true)
-      setLog('Iniciando rebalanceamento (CoW como principal; 0x fallback)...')
+      setLog('Iniciando rebalanceamento (CoW principal; 0x fallback)...')
 
       /** ===== ETH -> USDC (CoW) ===== */
       if (thirtyEth > 0n) {
         setLog(p => p + `\nETH: 30% = ${formatUnits(thirtyEth, 18)} ETH`)
-        if (thirtyEth < MIN_ETH_WEI) {
-          setLog(p => p + `\n⏭️  CoW pulado (ETH → USDC): montante abaixo do mínimo (${formatUnits(MIN_ETH_WEI, 18)} ETH).`)
-        } else {
-          try {
-            const q = await getCowQuote({
-              sellToken: COW_ETH,
-              buyToken: USDC,
-              sellAmountWei: thirtyEth.toString(),
-              from: address,
-            })
+        try {
+          const q = await getCowQuote({
+            sellToken: COW_ETH,
+            buyToken: USDC,
+            sellAmountWei: thirtyEth.toString(),
+            from: address,
+          })
 
-            const validTo = Math.floor(Date.now() / 1000) + 60 * 15 // 15 min
-            const order: CowOrder = {
-              sellToken: COW_ETH,
-              buyToken: USDC,
-              receiver: address,
-              sellAmount: q.quote.sellAmount,
-              buyAmount: q.quote.buyAmount,
-              feeAmount: q.quote.feeAmount,
-              validTo,
-              appData: ZERO_APP_DATA,
-              kind: 'sell',
-              partiallyFillable: false,
-              sellTokenBalance: 'external', // ETH sai direto da carteira
-              buyTokenBalance: 'erc20',
-            }
-
-            setLog(p => p + `\nAssinando ordem CoW (ETH → USDC)...`)
-            const orderRes = await postCowOrder({
-              order,
-              owner: address,
-              chainId: base.id,
-              signTypedData: async (args) =>
-                walletClient!.signTypedData({
-                  domain: args.domain,
-                  types: args.types as any,
-                  primaryType: args.primaryType,
-                  message: args.message,
-                }) as Promise<`0x${string}`>,
-            })
-
-            setLog(p => p + `\n✔️ Ordem CoW enviada (ETH → USDC): ${orderRes?.orderUid ?? ''}`)
-            setLog(p => p + `\n(Obs.: CoW é gasless; a execução ocorre quando o solver encontra o match.)`)
-          } catch (err) {
-            const ax = err as AxiosError<any>
-            const is404 = (ax.response?.status === 404)
-            setLog(p => p + `\n⚠️ CoW falhou (ETH → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — possivelmente valor baixo ou sem rota no momento.' : ''} Tentando 0x...`)
-            await swapWith0x('ETH', thirtyEth, 'ETH')
+          const validTo = Math.floor(Date.now() / 1000) + 60 * 30 // 30 min
+          const order: CowOrder = {
+            sellToken: COW_ETH,
+            buyToken: USDC,
+            receiver: address,
+            sellAmount: q.quote.sellAmount,
+            buyAmount: q.quote.buyAmount,
+            feeAmount: q.quote.feeAmount,
+            validTo,
+            appData: ZERO_APP_DATA,
+            kind: 'sell',
+            partiallyFillable: true,        // ajuda ordens pequenas
+            sellTokenBalance: 'external',   // ETH sai direto da carteira
+            buyTokenBalance: 'erc20',
           }
+
+          setLog(p => p + `\nAssinando ordem CoW (ETH → USDC)...`)
+          const orderRes = await postCowOrder({
+            order,
+            owner: address,
+            chainId: base.id,
+            signTypedData: async (args) =>
+              walletClient!.signTypedData({
+                domain: args.domain,
+                types: args.types as any,
+                primaryType: args.primaryType,
+                message: args.message,
+              }) as Promise<`0x${string}`>,
+          })
+
+          setLog(p => p + `\n✔️ Ordem CoW enviada (ETH → USDC): ${orderRes?.orderUid ?? ''}`)
+          setLog(p => p + `\n(CoW é gasless; execução ocorre quando o solver encontrar o match.)`)
+        } catch (err) {
+          const ax = err as AxiosError<any>
+          const is404 = (ax.response?.status === 404)
+          setLog(p => p + `\n⚠️ CoW falhou (ETH → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — sem rota no momento.' : ''} Tentando 0x...`)
+          await swapWith0x('ETH', thirtyEth, 'ETH')
         }
       } else {
         setLog(p => p + `\nSem ETH suficiente para rebalancear.`)
@@ -368,57 +350,53 @@ export default function Rebalanceamento() {
       /** ===== cbBTC -> USDC (CoW) ===== */
       if (thirtyCb > 0n) {
         setLog(p => p + `\ncbBTC: 30% = ${formatUnits(thirtyCb, cbBtcDec)} cbBTC`)
-        if (thirtyCb < MIN_CBBTC_WEI) {
-          setLog(p => p + `\n⏭️  CoW pulado (cbBTC → USDC): montante muito pequeno.`)
-        } else {
-          try {
-            // approve para o Vault Relayer
-            await ensureApproveForCow(CBBTC, address, thirtyCb)
+        try {
+          // approve para o Vault Relayer
+          await ensureApproveForCow(CBBTC, address, thirtyCb)
 
-            const q = await getCowQuote({
-              sellToken: CBBTC,
-              buyToken: USDC,
-              sellAmountWei: thirtyCb.toString(),
-              from: address,
-            })
+          const q = await getCowQuote({
+            sellToken: CBBTC,
+            buyToken: USDC,
+            sellAmountWei: thirtyCb.toString(),
+            from: address,
+          })
 
-            const validTo = Math.floor(Date.now() / 1000) + 60 * 15
-            const order: CowOrder = {
-              sellToken: CBBTC,
-              buyToken: USDC,
-              receiver: address,
-              sellAmount: q.quote.sellAmount,
-              buyAmount: q.quote.buyAmount,
-              feeAmount: q.quote.feeAmount,
-              validTo,
-              appData: ZERO_APP_DATA,
-              kind: 'sell',
-              partiallyFillable: false,
-              sellTokenBalance: 'erc20',
-              buyTokenBalance: 'erc20',
-            }
-
-            setLog(p => p + `\nAssinando ordem CoW (cbBTC → USDC)...`)
-            const orderRes = await postCowOrder({
-              order,
-              owner: address,
-              chainId: base.id,
-              signTypedData: async (args) =>
-                walletClient!.signTypedData({
-                  domain: args.domain,
-                  types: args.types as any,
-                  primaryType: args.primaryType,
-                  message: args.message,
-                }) as Promise<`0x${string}`>,
-            })
-
-            setLog(p => p + `\n✔️ Ordem CoW enviada (cbBTC → USDC): ${orderRes?.orderUid ?? ''}`)
-          } catch (err) {
-            const ax = err as AxiosError<any>
-            const is404 = (ax.response?.status === 404)
-            setLog(p => p + `\n⚠️ CoW falhou (cbBTC → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — possivelmente valor baixo ou sem rota no momento.' : ''} Tentando 0x...`)
-            await swapWith0x(CBBTC, thirtyCb, 'cbBTC')
+          const validTo = Math.floor(Date.now() / 1000) + 60 * 30
+          const order: CowOrder = {
+            sellToken: CBBTC,
+            buyToken: USDC,
+            receiver: address,
+            sellAmount: q.quote.sellAmount,
+            buyAmount: q.quote.buyAmount,
+            feeAmount: q.quote.feeAmount,
+            validTo,
+            appData: ZERO_APP_DATA,
+            kind: 'sell',
+            partiallyFillable: true,       // ajuda ordens pequenas
+            sellTokenBalance: 'erc20',
+            buyTokenBalance: 'erc20',
           }
+
+          setLog(p => p + `\nAssinando ordem CoW (cbBTC → USDC)...`)
+          const orderRes = await postCowOrder({
+            order,
+            owner: address,
+            chainId: base.id,
+            signTypedData: async (args) =>
+              walletClient!.signTypedData({
+                domain: args.domain,
+                types: args.types as any,
+                primaryType: args.primaryType,
+                message: args.message,
+              }) as Promise<`0x${string}`>,
+          })
+
+          setLog(p => p + `\n✔️ Ordem CoW enviada (cbBTC → USDC): ${orderRes?.orderUid ?? ''}`)
+        } catch (err) {
+          const ax = err as AxiosError<any>
+          const is404 = (ax.response?.status === 404)
+          setLog(p => p + `\n⚠️ CoW falhou (cbBTC → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — sem rota no momento.' : ''} Tentando 0x...`)
+          await swapWith0x(CBBTC, thirtyCb, 'cbBTC')
         }
       } else {
         setLog(p => p + `\nSem cbBTC suficiente para rebalancear.`)
@@ -439,7 +417,7 @@ export default function Rebalanceamento() {
 
   return (
     <main style={{ maxWidth: 900, margin: '40px auto', padding: 16 }}>
-      <h1>Rebalanceamento — 30% para USDC (CoW & 0x fallback)</h1>
+      <h1>Rebalanceamento — 30% para USDC (CoW principal)</h1>
       <ConnectButton />
 
       {isConnected ? (
@@ -451,8 +429,8 @@ export default function Rebalanceamento() {
               <strong>cbBTC:</strong> {formatUnits(cbBtcBal, cbBtcDec)} cbBTC
             </p>
             <p>
-              <strong>30% ETH:</strong> {formatUnits(thirtyEth, 18)} ETH &nbsp;|&nbsp;
-              <strong>30% cbBTC:</strong> {formatUnits(thirtyCb, cbBtcDec)} cbBTC
+              <strong>30% ETH:</strong> {formatUnits(ethBal / 10n * 3n, 18)} ETH &nbsp;|&nbsp;
+              <strong>30% cbBTC:</strong> {formatUnits(cbBtcBal / 10n * 3n, cbBtcDec)} cbBTC
             </p>
           </div>
 
@@ -469,8 +447,8 @@ export default function Rebalanceamento() {
           </pre>
 
           <p style={{ fontSize: 12, opacity: .8 }}>
-            CoW = assinatura EIP-712 (gasless, ordem off-chain). Se a CoW não cotar no momento
-            (valor baixo ou sem rota), o fallback 0x tenta executar on-chain. Tenha ETH para gás.
+            CoW = assinatura EIP-712 (gasless, ordem off-chain). Se a CoW não cotar no momento,
+            o fallback 0x tenta executar on-chain. Tenha ETH para gás no fallback.
           </p>
         </>
       ) : (
