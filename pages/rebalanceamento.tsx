@@ -20,8 +20,11 @@ const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
 const COW_API = 'https://api.cow.fi/base-mainnet/api/v1'
 // ETH “nativo” para a CoW (aceito pela API)
 const COW_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
-// Settlement (mesmo endereço usado nos deployments suportados pela CoW)
+// Settlement (contrato verificador de domínio EIP-712 da CoW)
 const COW_SETTLEMENT = getAddress('0x9008d19f58aAbd9eD0D60971565AA8510560ab41')
+
+// 32 bytes zerados para appData (hex tipado)
+const ZERO_APP_DATA = ('0x' + '0'.repeat(64)) as `0x${string}`
 
 type ZeroExQuote = {
   to: `0x${string}`
@@ -70,7 +73,6 @@ type CowQuote = {
   from?: string
   expiration?: number
   id?: string
-  // quando vendendo ETH, a API pode retornar estimatedFee ou constraints; não é necessário para assinar
 }
 
 type CowOrder = {
@@ -80,7 +82,7 @@ type CowOrder = {
   sellAmount: string
   buyAmount: string
   validTo: number
-  appData: `0x${string}`          // bytes32 (pode ser zero)
+  appData: `0x${string}`
   feeAmount: string
   kind: 'sell' | 'buy'
   partiallyFillable: boolean
@@ -108,7 +110,6 @@ const ORDER_TYPES: Record<string, TypedDataParameter[]> = {
 /** pega endereço do Vault Relayer (para approve) */
 async function getCowVaultRelayer(): Promise<`0x${string}`> {
   const { data } = await axios.get(`${COW_API}/relayer`)
-  // resposta típica: { address: "0x..." }
   return getAddress(data.address)
 }
 
@@ -124,7 +125,7 @@ async function getCowQuote(params: {
     buyToken: params.buyToken,
     from: params.from,
     receiver: params.from,
-    sellAmountBeforeFee: params.sellAmountWei, // a CoW calcula a fee
+    sellAmountBeforeFee: params.sellAmountWei, // CoW calcula a fee
   }
   const { data } = await axios.post(`${COW_API}/quote`, payload)
   return data
@@ -158,7 +159,6 @@ async function postCowOrder(opts: {
     message: order,
   })
 
-  // envia ordem
   const res = await axios.post(`${COW_API}/orders`, {
     ...order,
     signingScheme: 'eip712',
@@ -166,10 +166,9 @@ async function postCowOrder(opts: {
     from: owner,
   })
 
-  return res.data // contém orderUid, etc.
+  return res.data // orderUid, etc.
 }
 
-/** ======= Página ======= */
 export default function Rebalanceamento() {
   const { address, chainId, isConnected } = useAccount()
   const publicClient = usePublicClient()
@@ -248,27 +247,25 @@ export default function Rebalanceamento() {
       takerAddress: address,
     })
 
-    // approva se necessário (apenas quando vendendo ERC-20)
+    // approve se necessário (apenas quando vendendo ERC-20)
     if (sellToken !== 'ETH' && quote.allowanceTarget) {
-      await (async () => {
-        const allowance = await publicClient!.readContract({
+      const allowance = await publicClient.readContract({
+        address: sellToken as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [address, quote.allowanceTarget as `0x${string}`],
+      }) as bigint
+      if (allowance < BigInt(quote.sellAmount)) {
+        setLog(p => p + `\nAprovando (0x) ${sellToken}...`)
+        const hash = await walletClient.writeContract({
           address: sellToken as `0x${string}`,
           abi: erc20Abi,
-          functionName: 'allowance',
-          args: [address, quote.allowanceTarget as `0x${string}`],
-        }) as bigint
-        if (allowance < BigInt(quote.sellAmount)) {
-          setLog(p => p + `\nAprovando (0x) ${sellToken}...`)
-          const hash = await walletClient!.writeContract({
-            address: sellToken as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [quote.allowanceTarget as `0x${string}`, BigInt(quote.sellAmount)],
-            chain: base,
-          })
-          await publicClient!.waitForTransactionReceipt({ hash })
-        }
-      })()
+          functionName: 'approve',
+          args: [quote.allowanceTarget as `0x${string}`, BigInt(quote.sellAmount)],
+          chain: base,
+        })
+        await publicClient.waitForTransactionReceipt({ hash })
+      }
     }
 
     setLog(p => p + `\nExecutando via 0x — ${label} → USDC...`)
@@ -290,7 +287,7 @@ export default function Rebalanceamento() {
       setBusy(true)
       setLog('Iniciando rebalanceamento (CoW como principal; 0x fallback)...')
 
-      /** ===== ETH -> USDC ===== */
+      /** ===== ETH -> USDC (CoW) ===== */
       if (thirtyEth > 0n) {
         setLog(p => p + `\nETH: 30% = ${formatUnits(thirtyEth, 18)} ETH`)
         try {
@@ -301,7 +298,6 @@ export default function Rebalanceamento() {
             from: address,
           })
 
-          // monta ordem (kind: 'sell')
           const validTo = Math.floor(Date.now() / 1000) + 60 * 15 // 15 min
           const order: CowOrder = {
             sellToken: COW_ETH,
@@ -311,11 +307,10 @@ export default function Rebalanceamento() {
             buyAmount: q.quote.buyAmount,
             feeAmount: q.quote.feeAmount,
             validTo,
-            appData: '0x' + '0'.repeat(64),
+            appData: ZERO_APP_DATA,
             kind: 'sell',
             partiallyFillable: false,
-            // ETH é “external” (sai direto da carteira)
-            sellTokenBalance: 'external',
+            sellTokenBalance: 'external', // ETH sai direto da carteira
             buyTokenBalance: 'erc20',
           }
 
@@ -344,7 +339,7 @@ export default function Rebalanceamento() {
         setLog(p => p + `\nSem ETH suficiente para rebalancear.`)
       }
 
-      /** ===== cbBTC -> USDC ===== */
+      /** ===== cbBTC -> USDC (CoW) ===== */
       if (thirtyCb > 0n) {
         setLog(p => p + `\ncbBTC: 30% = ${formatUnits(thirtyCb, cbBtcDec)} cbBTC`)
         try {
@@ -367,7 +362,7 @@ export default function Rebalanceamento() {
             buyAmount: q.quote.buyAmount,
             feeAmount: q.quote.feeAmount,
             validTo,
-            appData: '0x' + '0'.repeat(64),
+            appData: ZERO_APP_DATA,
             kind: 'sell',
             partiallyFillable: false,
             sellTokenBalance: 'erc20',
