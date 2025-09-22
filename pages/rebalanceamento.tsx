@@ -5,17 +5,18 @@ import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { base } from 'wagmi/chains'
 import { erc20Abi, formatUnits, getAddress } from 'viem'
 import axios, { AxiosError } from 'axios'
+import Image from 'next/image'
 
-// ---- detector simples de mobile (iOS/Android) para abrir a CoW em nova aba ----
+// detector simples de mobile (iOS/Android)
 const isMobile = typeof navigator !== 'undefined'
   ? /iphone|ipad|ipod|android/i.test(navigator.userAgent)
   : false
 
-// ---- contratos (Base) ----
+// contratos (Base)
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
 
-// ---- 0x types (apenas para fallback) ----
+// 0x: tipos e função (usado apenas como fallback automático)
 type ZeroExQuote = {
   to: `0x${string}`
   data: `0x${string}`
@@ -24,10 +25,9 @@ type ZeroExQuote = {
   sellAmount: string
 }
 
-// 0x (Base) — apenas fallback quando quiser execução automática
 async function get0xQuoteBase(opts: {
   sellToken: string
-  buyToken: string // ERC20 addr ou 'ETH'
+  buyToken: string
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
@@ -59,23 +59,22 @@ export default function Rebalanceamento() {
   const [log, setLog] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // saldos lidos on-chain
+  // saldos
   const [ethWei, setEthWei] = useState<bigint>(0n)
   const [cbBtcWei, setCbBtcWei] = useState<bigint>(0n)
-  const [cbBtcDecimals, setCbBtcDecimals] = useState<number>(8) // cbBTC costuma ter 8
+  const [cbBtcDecimals, setCbBtcDecimals] = useState<number>(8)
 
-  // 30% dos saldos (em wei)
+  // 30%
   const eth30 = useMemo(() => (ethWei * 30n) / 100n, [ethWei])
   const cbBtc30 = useMemo(() => (cbBtcWei * 30n) / 100n, [cbBtcWei])
 
-  // strings decimais para CoW widget (sellAmount é decimal, não wei)
+  // strings decimais (CoW widget usa decimais, não wei)
   const eth30Decimal = useMemo(() => formatUnits(eth30, 18), [eth30])
   const cbBtc30Decimal = useMemo(() => formatUnits(cbBtc30, cbBtcDecimals), [cbBtc30, cbBtcDecimals])
 
   // URLs dos widgets da CoW (cadeia 8453 = Base)
   const cowUrlEthToUsdc = useMemo(() => {
     if (!eth30 || eth30 === 0n) return ''
-    // ETH nativo pode ser referenciado como ETH no widget
     return `https://swap.cow.fi/#/8453/swap/ETH/${USDC}?sellAmount=${eth30Decimal}&theme=dark&hideNetworkSelector=true`
   }, [eth30, eth30Decimal])
 
@@ -84,16 +83,16 @@ export default function Rebalanceamento() {
     return `https://swap.cow.fi/#/8453/swap/${CBBTC}/${USDC}?sellAmount=${cbBtc30Decimal}&theme=dark&hideNetworkSelector=true`
   }, [cbBtc30, cbBtc30Decimal])
 
-  // Lê saldos assim que a carteira conectar ou rede mudar
+  // ler saldos
   useEffect(() => {
     const load = async () => {
       if (!address || !publicClient || chainId !== base.id) return
       try {
-        setLog('')
         setBusy(true)
+        setLog('')
         setLog(p => p + 'Lendo saldos na Base...\n')
 
-        // ETH (nativo)
+        // ETH
         const ethHex = await publicClient.request({
           method: 'eth_getBalance',
           params: [address, 'latest'],
@@ -101,7 +100,7 @@ export default function Rebalanceamento() {
         const eth = BigInt(ethHex)
         setEthWei(eth)
 
-        // cbBTC: decimals + balanceOf
+        // cbBTC
         const [dec, bal] = await Promise.all([
           publicClient.readContract({
             address: CBBTC,
@@ -131,7 +130,7 @@ export default function Rebalanceamento() {
     load()
   }, [address, chainId, publicClient])
 
-  // ---- Fallback 0x (execução automática) — opcional ----
+  // fallback 0x automático (opcional)
   async function runFallbackZeroX() {
     if (!address || !publicClient || !walletClient) return
     if (chainId !== base.id) {
@@ -144,7 +143,7 @@ export default function Rebalanceamento() {
 
       const actions: Array<{ label: string; q?: ZeroExQuote | null }> = []
 
-      // ETH → USDC (em wei)
+      // ETH → USDC
       if (eth30 > 0n) {
         try {
           const qEth = await get0xQuoteBase({
@@ -160,7 +159,7 @@ export default function Rebalanceamento() {
         }
       }
 
-      // cbBTC → USDC (em wei)
+      // cbBTC → USDC
       if (cbBtc30 > 0n) {
         try {
           const qCb = await get0xQuoteBase({
@@ -176,12 +175,11 @@ export default function Rebalanceamento() {
         }
       }
 
-      // approvals + execuções
+      // approvals e execução
       for (const a of actions) {
         if (!a.q) continue
         const { q } = a
 
-        // se for token ERC20 (cbBTC) pode exigir approve
         if (q.allowanceTarget && q.sellAmount !== '0') {
           try {
             const allowance = await publicClient.readContract({
@@ -192,7 +190,7 @@ export default function Rebalanceamento() {
             }) as bigint
 
             if (allowance < BigInt(q.sellAmount)) {
-              setLog(p => p + `Aprovando cbBTC para spender ${q.allowanceTarget}...\n`)
+              setLog(p => p + `Aprovando cbBTC para ${q.allowanceTarget}...\n`)
               const tx = await walletClient.writeContract({
                 address: CBBTC,
                 abi: erc20Abi,
@@ -228,49 +226,103 @@ export default function Rebalanceamento() {
   }
 
   return (
-    <main style={{ maxWidth: 1000, margin: '40px auto', padding: 16 }}>
-      <h1>Rebalanceamento — 30% para USDC (CoW principal)</h1>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+    <main
+      style={{
+        maxWidth: 980,
+        margin: '40px auto',
+        padding: 16,
+        textAlign: 'center',
+        background: '#000',
+        color: '#fff',
+        borderRadius: 12,
+      }}
+    >
+      {/* logo no topo (mesmo da index) */}
+      <div style={{ marginBottom: 16 }}>
+        <Image
+          src="/logo-vamos.png"
+          alt="Vamos Pra Crypto"
+          width={140}
+          height={140}
+          priority
+        />
+      </div>
+
+      <h1 style={{ color: '#4ade80', marginTop: 0 }}>
+        Rebalanceamento — 30% para USDC (CoW principal)
+      </h1>
+
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginBottom: 10 }}>
         <ConnectButton />
       </div>
 
-      <p><b>Rede:</b> {chainId === base.id ? 'Base' : '—'}</p>
-      <p style={{ margin: 0 }}>
-        <b>ETH:</b> {formatUnits(ethWei, 18)} ETH
-        {' '}| <b>cbBTC:</b> {formatUnits(cbBtcWei, cbBtcDecimals)} cbBTC
+      <p style={{ opacity: 0.9, marginTop: 4 }}>
+        <b>Rede:</b> {chainId === base.id ? 'Base' : '—'}
       </p>
-      <p>
-        <b>30% ETH:</b> {formatUnits(eth30, 18)} | <b>30% cbBTC:</b> {formatUnits(cbBtc30, cbBtcDecimals)}
+
+      <p style={{ margin: 0 }}>
+        <b>ETH:</b> {formatUnits(ethWei, 18)} ETH &nbsp;|&nbsp;
+        <b>cbBTC:</b> {formatUnits(cbBtcWei, cbBtcDecimals)} cbBTC
+      </p>
+      <p style={{ marginTop: 4 }}>
+        <b>30% ETH:</b> {formatUnits(eth30, 18)} &nbsp;|&nbsp;
+        <b>30% cbBTC:</b> {formatUnits(cbBtc30, cbBtcDecimals)}
       </p>
 
       {isConnected && chainId === base.id ? (
         <>
-          {/* Botões */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-            {/* Fallback 0x automático é opcional */}
+          {/* ações */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
             <button
               onClick={runFallbackZeroX}
               disabled={busy}
-              style={{ padding: '10px 16px', fontWeight: 700, borderRadius: 10, background: '#111827', color: '#fff', border: 'none' }}
+              style={{
+                padding: '10px 16px',
+                fontWeight: 700,
+                borderRadius: 10,
+                background: '#111827',
+                color: '#fff',
+                border: 'none',
+              }}
             >
               Fallback 0x (automático)
             </button>
           </div>
 
-          {/* Logs */}
-          <pre style={{ background: '#0b0b0b', color: '#a7f3d0', padding: 12, marginTop: 16, whiteSpace: 'pre-wrap' }}>
-            {log || 'Pronto para rebalancear. Abaixo, use os widgets da CoW para enviar as ordens gasless (assinatura).'}
+          {/* logs */}
+          <pre
+            style={{
+              background: '#0b0b0b',
+              color: '#a7f3d0',
+              padding: 12,
+              marginTop: 16,
+              whiteSpace: 'pre-wrap',
+              textAlign: 'left',
+              borderRadius: 8,
+            }}
+          >
+            {log || 'Pronto para rebalancear. Use os widgets da CoW abaixo.'}
           </pre>
 
-          {/* Widgets CoW: ETH → USDC */}
-          <h3 style={{ marginTop: 18 }}>CoW — ETH → USDC (30% do ETH)</h3>
+          {/* CoW — ETH → USDC */}
+          <h3 style={{ marginTop: 18, color: '#38bdf8' }}>
+            CoW — ETH → USDC (30% do ETH)
+          </h3>
           {eth30 > 0n ? (
             isMobile ? (
               <a
                 href={cowUrlEthToUsdc}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#1f2937', color: '#fff', textDecoration: 'none' }}
+                style={{
+                  display: 'inline-block',
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  background: '#1f2937',
+                  color: '#fff',
+                  textDecoration: 'none',
+                  marginBottom: 16,
+                }}
               >
                 Abrir ETH→USDC na CoW (nova aba)
               </a>
@@ -283,18 +335,28 @@ export default function Rebalanceamento() {
               />
             )
           ) : (
-            <p>Nenhum ETH para vender.</p>
+            <p style={{ opacity: 0.8 }}>Nenhum ETH para vender.</p>
           )}
 
-          {/* Widgets CoW: cbBTC → USDC */}
-          <h3 style={{ marginTop: 18 }}>CoW — cbBTC → USDC (30% do cbBTC)</h3>
+          {/* CoW — cbBTC → USDC */}
+          <h3 style={{ marginTop: 18, color: '#38bdf8' }}>
+            CoW — cbBTC → USDC (30% do cbBTC)
+          </h3>
           {cbBtc30 > 0n ? (
             isMobile ? (
               <a
                 href={cowUrlCbBtcToUsdc}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#1f2937', color: '#fff', textDecoration: 'none' }}
+                style={{
+                  display: 'inline-block',
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  background: '#1f2937',
+                  color: '#fff',
+                  textDecoration: 'none',
+                  marginBottom: 16,
+                }}
               >
                 Abrir cbBTC→USDC na CoW (nova aba)
               </a>
@@ -307,16 +369,17 @@ export default function Rebalanceamento() {
               />
             )
           ) : (
-            <p>Nenhum cbBTC para vender.</p>
+            <p style={{ opacity: 0.8 }}>Nenhum cbBTC para vender.</p>
           )}
 
-          <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
-            CoW = assinatura EIP-712 (gasless, ordem off-chain). Em iPhone/iPad/Android, as carteiras não expõem o provider dentro de iframes;
-            por isso abrimos o widget em uma nova aba. Se quiser execução automática on-chain, use o fallback 0x.
+          <p style={{ marginTop: 8, fontSize: 12, opacity: .75 }}>
+            CoW = assinatura EIP-712 (gasless, ordem off-chain). Em iPhone/iPad/Android, as carteiras não expõem o
+            provider dentro de iframes; por isso abrimos o widget em uma nova aba. Se quiser execução automática on-chain,
+            use o fallback 0x.
           </p>
         </>
       ) : (
-        <p>Conecte sua carteira na rede Base.</p>
+        <p style={{ marginTop: 16 }}>Conecte sua carteira na rede Base para continuar.</p>
       )}
     </main>
   )
