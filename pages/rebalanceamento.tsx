@@ -1,44 +1,33 @@
 // pages/rebalanceamento.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
-import { useAccount, useBalance, usePublicClient, useWalletClient } from 'wagmi'
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { base } from 'wagmi/chains'
+import { erc20Abi, formatUnits, getAddress } from 'viem'
 import axios, { AxiosError } from 'axios'
-import {
-  erc20Abi,
-  formatUnits,
-  getAddress,
-  type TypedDataDomain,
-  type TypedDataParameter,
-} from 'viem'
 
-/** ======= Constantes (Base) ======= */
+// ---- detector simples de mobile (iOS/Android) para abrir a CoW em nova aba ----
+const isMobile = typeof navigator !== 'undefined'
+  ? /iphone|ipad|ipod|android/i.test(navigator.userAgent)
+  : false
+
+// ---- contratos (Base) ----
 const USDC  = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
 const CBBTC = getAddress('0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf')
 
-// CoW API (Base)
-const COW_API = 'https://api.cow.fi/base-mainnet/api/v1'
-// ETH “nativo” para a CoW (aceito pela API)
-const COW_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
-// Settlement (verifyingContract do EIP-712)
-const COW_SETTLEMENT = getAddress('0x9008d19f58aAbd9eD0D60971565AA8510560ab41')
-
-// 32 bytes zerados para appData (hex tipado)
-const ZERO_APP_DATA = ('0x' + '0'.repeat(64)) as `0x${string}`
-
+// ---- 0x types (apenas para fallback) ----
 type ZeroExQuote = {
   to: `0x${string}`
   data: `0x${string}`
   allowanceTarget?: `0x${string}`
   buyAmount: string
   sellAmount: string
-  value?: string
 }
 
-/** ======= 0x (fallback) ======= */
+// 0x (Base) — apenas fallback quando quiser execução automática
 async function get0xQuoteBase(opts: {
-  sellToken: string          // 'ETH' | token addr
-  buyToken: string           // token addr
+  sellToken: string
+  buyToken: string // ERC20 addr ou 'ETH'
   sellAmountWei: string
   takerAddress: string
   slippagePerc?: number
@@ -59,115 +48,7 @@ async function get0xQuoteBase(opts: {
     allowanceTarget: data.allowanceTarget || data.spender,
     buyAmount: data.buyAmount,
     sellAmount: data.sellAmount,
-    value: data.value,
   }
-}
-
-/** ======= CoW helpers ======= */
-type CowQuote = {
-  quote: {
-    buyAmount: string
-    sellAmount: string
-    feeAmount: string
-  }
-  from?: string
-  expiration?: number
-  id?: string
-}
-
-type CowOrder = {
-  sellToken: string
-  buyToken: string
-  receiver: string
-  sellAmount: string
-  buyAmount: string
-  validTo: number
-  appData: `0x${string}`
-  feeAmount: string
-  kind: 'sell' | 'buy'
-  partiallyFillable: boolean
-  sellTokenBalance: 'erc20' | 'external' | 'internal'
-  buyTokenBalance: 'erc20' | 'external' | 'internal'
-}
-
-const ORDER_TYPES: Record<string, TypedDataParameter[]> = {
-  Order: [
-    { name: 'sellToken', type: 'address' },
-    { name: 'buyToken',  type: 'address' },
-    { name: 'receiver',  type: 'address' },
-    { name: 'sellAmount', type: 'uint256' },
-    { name: 'buyAmount',  type: 'uint256' },
-    { name: 'validTo',    type: 'uint32'  },
-    { name: 'appData',    type: 'bytes32' },
-    { name: 'feeAmount',  type: 'uint256' },
-    { name: 'kind',       type: 'string'  },
-    { name: 'partiallyFillable', type: 'bool' },
-    { name: 'sellTokenBalance',  type: 'string' },
-    { name: 'buyTokenBalance',   type: 'string'  },
-  ],
-}
-
-/** pega endereço do Vault Relayer (para approve) */
-async function getCowVaultRelayer(): Promise<`0x${string}`> {
-  const { data } = await axios.get(`${COW_API}/relayer`)
-  return getAddress(data.address)
-}
-
-/** pede uma cotação na CoW */
-async function getCowQuote(params: {
-  sellToken: string    // address ou COW_ETH
-  buyToken: string     // address
-  sellAmountWei: string
-  from: string
-}): Promise<CowQuote> {
-  const payload = {
-    sellToken: params.sellToken,
-    buyToken: params.buyToken,
-    from: params.from,
-    receiver: params.from,
-    // A API da CoW prefere "sellAmountBeforeFee" em wei (string)
-    sellAmountBeforeFee: params.sellAmountWei,
-  }
-  const { data } = await axios.post(`${COW_API}/quote`, payload)
-  return data
-}
-
-/** cria & envia ordem para CoW (assinatura EIP-712) */
-async function postCowOrder(opts: {
-  order: CowOrder
-  owner: `0x${string}`
-  chainId: number
-  signTypedData: (args: {
-    domain: TypedDataDomain
-    types: Record<string, TypedDataParameter[]>
-    primaryType: 'Order'
-    message: any
-  }) => Promise<`0x${string}`>
-}) {
-  const { order, owner, chainId, signTypedData } = opts
-
-  const domain: TypedDataDomain = {
-    name: 'Gnosis Protocol',
-    version: 'v2',
-    chainId,
-    verifyingContract: COW_SETTLEMENT,
-  }
-
-  const signature = await signTypedData({
-    domain,
-    types: ORDER_TYPES,
-    primaryType: 'Order',
-    message: order,
-  })
-
-  const res = await axios.post(`${COW_API}/orders`, {
-    ...order,
-    signingScheme: 'eip712',
-    signature,
-    from: owner,
-  })
-
-  return res.data // orderUid, etc.
 }
 
 export default function Rebalanceamento() {
@@ -175,20 +56,52 @@ export default function Rebalanceamento() {
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
 
-  // Saldos
-  const { data: ethBalUi } = useBalance({ address, chainId: base.id }) // ETH nativo
-  const [cbBtcBal, setCbBtcBal] = useState<bigint>(0n)
-  const [cbBtcDec, setCbBtcDec] = useState<number>(18)
-
-  // UI
-  const [busy, setBusy] = useState(false)
   const [log, setLog] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  // ler cbBTC on-chain
+  // saldos lidos on-chain
+  const [ethWei, setEthWei] = useState<bigint>(0n)
+  const [cbBtcWei, setCbBtcWei] = useState<bigint>(0n)
+  const [cbBtcDecimals, setCbBtcDecimals] = useState<number>(8) // cbBTC costuma ter 8
+
+  // 30% dos saldos (em wei)
+  const eth30 = useMemo(() => (ethWei * 30n) / 100n, [ethWei])
+  const cbBtc30 = useMemo(() => (cbBtcWei * 30n) / 100n, [cbBtcWei])
+
+  // strings decimais para CoW widget (sellAmount é decimal, não wei)
+  const eth30Decimal = useMemo(() => formatUnits(eth30, 18), [eth30])
+  const cbBtc30Decimal = useMemo(() => formatUnits(cbBtc30, cbBtcDecimals), [cbBtc30, cbBtcDecimals])
+
+  // URLs dos widgets da CoW (cadeia 8453 = Base)
+  const cowUrlEthToUsdc = useMemo(() => {
+    if (!eth30 || eth30 === 0n) return ''
+    // ETH nativo pode ser referenciado como ETH no widget
+    return `https://swap.cow.fi/#/8453/swap/ETH/${USDC}?sellAmount=${eth30Decimal}&theme=dark&hideNetworkSelector=true`
+  }, [eth30, eth30Decimal])
+
+  const cowUrlCbBtcToUsdc = useMemo(() => {
+    if (!cbBtc30 || cbBtc30 === 0n) return ''
+    return `https://swap.cow.fi/#/8453/swap/${CBBTC}/${USDC}?sellAmount=${cbBtc30Decimal}&theme=dark&hideNetworkSelector=true`
+  }, [cbBtc30, cbBtc30Decimal])
+
+  // Lê saldos assim que a carteira conectar ou rede mudar
   useEffect(() => {
-    async function loadCbBtc() {
+    const load = async () => {
+      if (!address || !publicClient || chainId !== base.id) return
       try {
-        if (!address || !publicClient || chainId !== base.id) return
+        setLog('')
+        setBusy(true)
+        setLog(p => p + 'Lendo saldos na Base...\n')
+
+        // ETH (nativo)
+        const ethHex = await publicClient.request({
+          method: 'eth_getBalance',
+          params: [address, 'latest'],
+        })
+        const eth = BigInt(ethHex)
+        setEthWei(eth)
+
+        // cbBTC: decimals + balanceOf
         const [dec, bal] = await Promise.all([
           publicClient.readContract({
             address: CBBTC,
@@ -202,257 +115,208 @@ export default function Rebalanceamento() {
             args: [address],
           }) as Promise<bigint>,
         ])
-        setCbBtcDec(dec)
-        setCbBtcBal(bal)
-      } catch { /* ignore */ }
+        setCbBtcDecimals(dec)
+        setCbBtcWei(bal)
+
+        setLog(p => p +
+          `ETH: ${formatUnits(eth, 18)} | cbBTC: ${formatUnits(bal, dec)}\n` +
+          `30% ETH: ${formatUnits((eth * 30n) / 100n, 18)} | 30% cbBTC: ${formatUnits((bal * 30n) / 100n, dec)}\n`
+        )
+      } catch (e: any) {
+        setLog(p => p + `❌ Erro ao ler saldos: ${e?.message || String(e)}\n`)
+      } finally {
+        setBusy(false)
+      }
     }
-    loadCbBtc()
-  }, [address, publicClient, chainId])
+    load()
+  }, [address, chainId, publicClient])
 
-  const ethBal = useMemo(() => BigInt(ethBalUi?.value ?? 0n), [ethBalUi])
-
-  // 30% em wei
-  const thirtyEth = ethBal / 10n * 3n
-  const thirtyCb  = cbBtcBal / 10n * 3n
-
-  async function ensureApproveForCow(token: `0x${string}`, owner: `0x${string}`, amount: bigint) {
-    if (!publicClient || !walletClient) return
-    const relayer = await getCowVaultRelayer()
-    const allowance = await publicClient.readContract({
-      address: token,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [owner, relayer],
-    }) as bigint
-
-    if (allowance >= amount) return
-
-    setLog(p => p + `\nAprovando ${token} para Vault Relayer da CoW...`)
-    const tx = await walletClient.writeContract({
-      address: token,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [relayer, amount],
-      chain: base,
-    })
-    await publicClient.waitForTransactionReceipt({ hash: tx })
-    setLog(p => p + `\n✔️ Approve confirmado.`)
-  }
-
-  async function swapWith0x(sellToken: string, amountWei: bigint, label: string) {
+  // ---- Fallback 0x (execução automática) — opcional ----
+  async function runFallbackZeroX() {
     if (!address || !publicClient || !walletClient) return
-
-    try {
-      const quote = await get0xQuoteBase({
-        sellToken,
-        buyToken: USDC,
-        sellAmountWei: amountWei.toString(),
-        takerAddress: address,
-      })
-
-      // approve se necessário (apenas quando vendendo ERC-20)
-      if (sellToken !== 'ETH' && quote.allowanceTarget) {
-        const allowance = await publicClient.readContract({
-          address: sellToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [address, quote.allowanceTarget as `0x${string}`],
-        }) as bigint
-        if (allowance < BigInt(quote.sellAmount)) {
-          setLog(p => p + `\nAprovando (0x) ${sellToken}...`)
-          const hash = await walletClient.writeContract({
-            address: sellToken as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'approve',
-            args: [quote.allowanceTarget as `0x${string}`, BigInt(quote.sellAmount)],
-            chain: base,
-          })
-          await publicClient.waitForTransactionReceipt({ hash })
-        }
-      }
-
-      setLog(p => p + `\nExecutando via 0x — ${label} → USDC...`)
-      const txHash = await walletClient.sendTransaction({
-        to: quote.to,
-        data: quote.data,
-        value: sellToken === 'ETH' ? BigInt(quote.value ?? '0') : 0n,
-        chain: base,
-      })
-      await publicClient.waitForTransactionReceipt({ hash: txHash })
-      setLog(p => p + `\n✔️ ${label} → USDC confirmado (0x).`)
-    } catch (err) {
-      const ax = err as AxiosError<any>
-      setLog(p => p + `\n❌ Fallback 0x falhou (${label}): ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}`)
+    if (chainId !== base.id) {
+      setLog(p => p + 'Troque para a rede Base.\n')
+      return
     }
-  }
-
-  async function rebalance30ToUSDC() {
     try {
-      if (!isConnected || !address || !publicClient || !walletClient) return
-      if (chainId !== base.id) throw new Error('Troque a rede para Base.')
-
       setBusy(true)
-      setLog('Iniciando rebalanceamento (CoW principal; 0x fallback)...')
+      setLog(p => p + 'Iniciando fallback 0x...\n')
 
-      /** ===== ETH -> USDC (CoW) ===== */
-      if (thirtyEth > 0n) {
-        setLog(p => p + `\nETH: 30% = ${formatUnits(thirtyEth, 18)} ETH`)
+      const actions: Array<{ label: string; q?: ZeroExQuote | null }> = []
+
+      // ETH → USDC (em wei)
+      if (eth30 > 0n) {
         try {
-          const q = await getCowQuote({
-            sellToken: COW_ETH,
+          const qEth = await get0xQuoteBase({
+            sellToken: 'ETH',
             buyToken: USDC,
-            sellAmountWei: thirtyEth.toString(),
-            from: address,
+            sellAmountWei: eth30.toString(),
+            takerAddress: address,
           })
-
-          const validTo = Math.floor(Date.now() / 1000) + 60 * 30 // 30 min
-          const order: CowOrder = {
-            sellToken: COW_ETH,
-            buyToken: USDC,
-            receiver: address,
-            sellAmount: q.quote.sellAmount,
-            buyAmount: q.quote.buyAmount,
-            feeAmount: q.quote.feeAmount,
-            validTo,
-            appData: ZERO_APP_DATA,
-            kind: 'sell',
-            partiallyFillable: true,        // ajuda ordens pequenas
-            sellTokenBalance: 'external',   // ETH sai direto da carteira
-            buyTokenBalance: 'erc20',
-          }
-
-          setLog(p => p + `\nAssinando ordem CoW (ETH → USDC)...`)
-          const orderRes = await postCowOrder({
-            order,
-            owner: address,
-            chainId: base.id,
-            signTypedData: async (args) =>
-              walletClient!.signTypedData({
-                domain: args.domain,
-                types: args.types as any,
-                primaryType: args.primaryType,
-                message: args.message,
-              }) as Promise<`0x${string}`>,
-          })
-
-          setLog(p => p + `\n✔️ Ordem CoW enviada (ETH → USDC): ${orderRes?.orderUid ?? ''}`)
-          setLog(p => p + `\n(CoW é gasless; execução ocorre quando o solver encontrar o match.)`)
+          actions.push({ label: 'ETH → USDC', q: qEth })
         } catch (err) {
           const ax = err as AxiosError<any>
-          const is404 = (ax.response?.status === 404)
-          setLog(p => p + `\n⚠️ CoW falhou (ETH → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — sem rota no momento.' : ''} Tentando 0x...`)
-          await swapWith0x('ETH', thirtyEth, 'ETH')
+          setLog(p => p + `⚠️ 0x falhou (ETH): ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}\n`)
         }
-      } else {
-        setLog(p => p + `\nSem ETH suficiente para rebalancear.`)
       }
 
-      /** ===== cbBTC -> USDC (CoW) ===== */
-      if (thirtyCb > 0n) {
-        setLog(p => p + `\ncbBTC: 30% = ${formatUnits(thirtyCb, cbBtcDec)} cbBTC`)
+      // cbBTC → USDC (em wei)
+      if (cbBtc30 > 0n) {
         try {
-          // approve para o Vault Relayer
-          await ensureApproveForCow(CBBTC, address, thirtyCb)
-
-          const q = await getCowQuote({
+          const qCb = await get0xQuoteBase({
             sellToken: CBBTC,
             buyToken: USDC,
-            sellAmountWei: thirtyCb.toString(),
-            from: address,
+            sellAmountWei: cbBtc30.toString(),
+            takerAddress: address,
           })
-
-          const validTo = Math.floor(Date.now() / 1000) + 60 * 30
-          const order: CowOrder = {
-            sellToken: CBBTC,
-            buyToken: USDC,
-            receiver: address,
-            sellAmount: q.quote.sellAmount,
-            buyAmount: q.quote.buyAmount,
-            feeAmount: q.quote.feeAmount,
-            validTo,
-            appData: ZERO_APP_DATA,
-            kind: 'sell',
-            partiallyFillable: true,       // ajuda ordens pequenas
-            sellTokenBalance: 'erc20',
-            buyTokenBalance: 'erc20',
-          }
-
-          setLog(p => p + `\nAssinando ordem CoW (cbBTC → USDC)...`)
-          const orderRes = await postCowOrder({
-            order,
-            owner: address,
-            chainId: base.id,
-            signTypedData: async (args) =>
-              walletClient!.signTypedData({
-                domain: args.domain,
-                types: args.types as any,
-                primaryType: args.primaryType,
-                message: args.message,
-              }) as Promise<`0x${string}`>,
-          })
-
-          setLog(p => p + `\n✔️ Ordem CoW enviada (cbBTC → USDC): ${orderRes?.orderUid ?? ''}`)
+          actions.push({ label: 'cbBTC → USDC', q: qCb })
         } catch (err) {
           const ax = err as AxiosError<any>
-          const is404 = (ax.response?.status === 404)
-          setLog(p => p + `\n⚠️ CoW falhou (cbBTC → USDC): ${ax.response?.status ?? ''} ${ax.response?.data?.error || ax.message}${is404 ? ' — sem rota no momento.' : ''} Tentando 0x...`)
-          await swapWith0x(CBBTC, thirtyCb, 'cbBTC')
+          setLog(p => p + `⚠️ 0x falhou (cbBTC): ${ax.response?.status ?? ''} ${ax.response?.data?.reason || ax.message}\n`)
         }
-      } else {
-        setLog(p => p + `\nSem cbBTC suficiente para rebalancear.`)
       }
 
-      if (thirtyEth === 0n && thirtyCb === 0n) {
-        setLog(p => p + `\nNada para rebalancear.`)
-      } else {
-        setLog(p => p + `\n✅ Fluxo concluído (ordens CoW enviadas e/ou fallback 0x executado).`)
+      // approvals + execuções
+      for (const a of actions) {
+        if (!a.q) continue
+        const { q } = a
+
+        // se for token ERC20 (cbBTC) pode exigir approve
+        if (q.allowanceTarget && q.sellAmount !== '0') {
+          try {
+            const allowance = await publicClient.readContract({
+              address: CBBTC,
+              abi: erc20Abi,
+              functionName: 'allowance',
+              args: [address, q.allowanceTarget],
+            }) as bigint
+
+            if (allowance < BigInt(q.sellAmount)) {
+              setLog(p => p + `Aprovando cbBTC para spender ${q.allowanceTarget}...\n`)
+              const tx = await walletClient.writeContract({
+                address: CBBTC,
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [q.allowanceTarget, BigInt(q.sellAmount)],
+                chain: base,
+              })
+              await publicClient.waitForTransactionReceipt({ hash: tx })
+              setLog(p => p + '✔️ Approve confirmado.\n')
+            }
+          } catch (e: any) {
+            setLog(p => p + `⚠️ Erro no approve: ${e?.shortMessage || e?.message}\n`)
+          }
+        }
+
+        setLog(p => p + `Enviando ${a.label} via 0x...\n`)
+        const h = await walletClient.sendTransaction({
+          to: q.to,
+          data: q.data,
+          value: 0n,
+          chain: base,
+        })
+        await publicClient.waitForTransactionReceipt({ hash: h })
+        setLog(p => p + `✔️ ${a.label} confirmado.\n`)
       }
+
+      setLog(p => p + 'Fluxo fallback 0x concluído.\n')
     } catch (e: any) {
-      const msg = e?.response?.data?.reason || e?.shortMessage || e?.message || String(e)
-      setLog(p => p + `\n❌ Erro: ${msg}`)
+      setLog(p => p + `❌ Erro (0x): ${e?.response?.data?.reason || e?.shortMessage || e?.message || String(e)}\n`)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto', padding: 16 }}>
+    <main style={{ maxWidth: 1000, margin: '40px auto', padding: 16 }}>
       <h1>Rebalanceamento — 30% para USDC (CoW principal)</h1>
-      <ConnectButton />
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+        <ConnectButton />
+      </div>
 
-      {isConnected ? (
+      <p><b>Rede:</b> {chainId === base.id ? 'Base' : '—'}</p>
+      <p style={{ margin: 0 }}>
+        <b>ETH:</b> {formatUnits(ethWei, 18)} ETH
+        {' '}| <b>cbBTC:</b> {formatUnits(cbBtcWei, cbBtcDecimals)} cbBTC
+      </p>
+      <p>
+        <b>30% ETH:</b> {formatUnits(eth30, 18)} | <b>30% cbBTC:</b> {formatUnits(cbBtc30, cbBtcDecimals)}
+      </p>
+
+      {isConnected && chainId === base.id ? (
         <>
-          <div style={{ marginTop: 16 }}>
-            <p><strong>Rede:</strong> {chainId === base.id ? 'Base' : 'Outra'}</p>
-            <p>
-              <strong>ETH:</strong> {ethBalUi ? `${ethBalUi.formatted} ETH` : '-'} &nbsp;|&nbsp;
-              <strong>cbBTC:</strong> {formatUnits(cbBtcBal, cbBtcDec)} cbBTC
-            </p>
-            <p>
-              <strong>30% ETH:</strong> {formatUnits(ethBal / 10n * 3n, 18)} ETH &nbsp;|&nbsp;
-              <strong>30% cbBTC:</strong> {formatUnits(cbBtcBal / 10n * 3n, cbBtcDec)} cbBTC
-            </p>
+          {/* Botões */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+            {/* Fallback 0x automático é opcional */}
+            <button
+              onClick={runFallbackZeroX}
+              disabled={busy}
+              style={{ padding: '10px 16px', fontWeight: 700, borderRadius: 10, background: '#111827', color: '#fff', border: 'none' }}
+            >
+              Fallback 0x (automático)
+            </button>
           </div>
 
-          <button
-            onClick={rebalance30ToUSDC}
-            disabled={busy || chainId !== base.id}
-            style={{ marginTop: 12, padding: '10px 16px', fontWeight: 700, borderRadius: 10, background: '#16a34a', color: '#fff', border: 'none' }}
-          >
-            {busy ? 'Executando…' : 'Rebalancear (30% → USDC)'}
-          </button>
-
+          {/* Logs */}
           <pre style={{ background: '#0b0b0b', color: '#a7f3d0', padding: 12, marginTop: 16, whiteSpace: 'pre-wrap' }}>
-            {log || 'Logs aparecerão aqui.'}
+            {log || 'Pronto para rebalancear. Abaixo, use os widgets da CoW para enviar as ordens gasless (assinatura).'}
           </pre>
 
-          <p style={{ fontSize: 12, opacity: .8 }}>
-            CoW = assinatura EIP-712 (gasless, ordem off-chain). Se a CoW não cotar no momento,
-            o fallback 0x tenta executar on-chain. Tenha ETH para gás no fallback.
+          {/* Widgets CoW: ETH → USDC */}
+          <h3 style={{ marginTop: 18 }}>CoW — ETH → USDC (30% do ETH)</h3>
+          {eth30 > 0n ? (
+            isMobile ? (
+              <a
+                href={cowUrlEthToUsdc}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#1f2937', color: '#fff', textDecoration: 'none' }}
+              >
+                Abrir ETH→USDC na CoW (nova aba)
+              </a>
+            ) : (
+              <iframe
+                src={cowUrlEthToUsdc}
+                style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone; web-share"
+              />
+            )
+          ) : (
+            <p>Nenhum ETH para vender.</p>
+          )}
+
+          {/* Widgets CoW: cbBTC → USDC */}
+          <h3 style={{ marginTop: 18 }}>CoW — cbBTC → USDC (30% do cbBTC)</h3>
+          {cbBtc30 > 0n ? (
+            isMobile ? (
+              <a
+                href={cowUrlCbBtcToUsdc}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', padding: '10px 14px', borderRadius: 10, background: '#1f2937', color: '#fff', textDecoration: 'none' }}
+              >
+                Abrir cbBTC→USDC na CoW (nova aba)
+              </a>
+            ) : (
+              <iframe
+                src={cowUrlCbBtcToUsdc}
+                style={{ width: '100%', height: 680, border: 0, borderRadius: 12 }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone; web-share"
+              />
+            )
+          ) : (
+            <p>Nenhum cbBTC para vender.</p>
+          )}
+
+          <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
+            CoW = assinatura EIP-712 (gasless, ordem off-chain). Em iPhone/iPad/Android, as carteiras não expõem o provider dentro de iframes;
+            por isso abrimos o widget em uma nova aba. Se quiser execução automática on-chain, use o fallback 0x.
           </p>
         </>
       ) : (
-        <p style={{ marginTop: 16 }}>Conecte sua carteira na rede Base para continuar.</p>
+        <p>Conecte sua carteira na rede Base.</p>
       )}
     </main>
   )
