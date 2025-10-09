@@ -23,11 +23,11 @@ const CBBTC_DECIMALS = 8 // cbBTC on Base uses 8 decimals
 const isMobile = typeof navigator !== "undefined" ? /iphone|ipad|ipod|android/i.test(navigator.userAgent) : false
 
 // Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
-const ETH_BUFFER = parseUnits("0.0002", 18) // ~0.0002 ETH
+const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
 
 
 // Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
-const ETH_BUFFER = parseUnits("0.0002", 18) // ~0.0002 ETH
+const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
 
 // ====== Types ======
 export type ZeroExQuote = {
@@ -186,7 +186,7 @@ const cowUrlCbBtc = useMemo(() => {
 
       // --- 2) Prepare ETH sell (leave small gas buffer) ---
       let ethSellWei = nativeEthWei
-      if (ethSellWei > ETH_BUFFER) ethSellWei = ethSellWei - ETH_BUFFER
+      if (ethSellWei > GAS_BUFFER_WEI) ethSellWei = ethSellWei - GAS_BUFFER_WEI
       else ethSellWei = 0n
 
       // --- 3) If have cbBTC, quote & approve, then swap ---
@@ -277,7 +277,7 @@ const cowUrlCbBtc = useMemo(() => {
       ])
 
       let ethForCow = nativeEthWei
-      if (ethForCow > ETH_BUFFER) ethForCow = ethForCow - ETH_BUFFER
+      if (ethForCow > GAS_BUFFER_WEI) ethForCow = ethForCow - GAS_BUFFER_WEI
       else ethForCow = 0n
 
       setEthSellWeiForCow(ethForCow)
