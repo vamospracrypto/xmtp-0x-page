@@ -286,7 +286,7 @@ export default function CashoutPage() {
 
       <h1 style={{ color: "#60A5FA", fontWeight: 800, fontSize: 28 }}>Cashout total → USDC (Base)</h1>
       <p style={{ opacity: 0.8, marginTop: 6, marginBottom: 14 }}>
-        CoW (widgets) como fonte primária. Se preferir, use o fallback automático 0x.
+        CoW (widgets) como fonte primária. Fallback automático 0x.
         Um pequeno buffer de gás é preservado.
       </p>
 
@@ -352,7 +352,7 @@ export default function CashoutPage() {
             cursor: canOperate && !busy ? "pointer" : "not-allowed",
           }}
         >
-          {busy ? "Preparando…" : "CoW primeiro (widgets)"}
+          {busy ? "Preparando…" : "CLIQUE AQUI PARA CASHOUT"}
         </button>
 
         <button
@@ -368,7 +368,7 @@ export default function CashoutPage() {
             cursor: canOperate && !busy ? "pointer" : "not-allowed",
           }}
         >
-          {busy ? "Executando…" : "Cashout total → USDC (fallback 0x)"}
+          {busy ? "Executando…" : "Fallback 0x"}
         </button>
       </div>
 
@@ -443,7 +443,7 @@ export default function CashoutPage() {
       </pre>
 
       <p style={{ marginTop: 10, fontSize: 12, opacity: 0.65 }}>
-        Powered by CoW & 0x. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
+        Powered by DeFI-In-Griffo. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
       </p>
     </main>
   )
