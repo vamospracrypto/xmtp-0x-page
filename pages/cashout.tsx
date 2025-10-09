@@ -17,18 +17,14 @@ import axios from "axios"
 const USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
 const CBBTC = getAddress("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf")
 const USDC_DECIMALS = 6
-const CBBTC_DECIMALS = 8 // cbBTC on Base uses 8 decimals
+$1const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
 
 // --- Detector de mobile (iframes não funcionam com provider em iOS/Android) ---
 const isMobile = typeof navigator !== "undefined" ? /iphone|ipad|ipod|android/i.test(navigator.userAgent) : false
 
 // Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
-const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
-
 
 // Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
-const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
-
 // ====== Types ======
 export type ZeroExQuote = {
   to: `0x${string}`
