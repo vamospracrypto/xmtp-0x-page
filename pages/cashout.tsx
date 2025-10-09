@@ -19,6 +19,13 @@ const CBBTC = getAddress("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf")
 const USDC_DECIMALS = 6
 const CBBTC_DECIMALS = 8 // cbBTC on Base uses 8 decimals
 
+// --- Detector de mobile (iframes não funcionam com provider em iOS/Android) ---
+const isMobile = typeof navigator !== "undefined" ? /iphone|ipad|ipod|android/i.test(navigator.userAgent) : false
+
+// Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
+const ETH_BUFFER = parseUnits("0.0002", 18) // ~0.0002 ETH
+
+
 // Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
 const ETH_BUFFER = parseUnits("0.0002", 18) // ~0.0002 ETH
 
@@ -80,6 +87,33 @@ async function ensureAllowance(params: {
 
   if (current >= amountWei) return
 
+  // Approve using raw sendTransaction (avoids TS mismatch with writeContract)
+  const { encodeFunctionData } = await import("viem")
+  const data = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [spender, amountWei],
+  })
+
+  const hash = await walletClient.sendTransaction({
+    account: owner,
+    to: token,
+    data,
+    chain: base,
+    value: 0n,
+  })
+  await publicClient!.waitForTransactionReceipt({ hash })
+} = params
+
+  const current: bigint = (await publicClient!.readContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [owner, spender],
+  })) as bigint
+
+  if (current >= amountWei) return
+
   // Approve exact amount (or you can set MaxUint256 if you prefer)
   const hash = await walletClient.writeContract({
     address: token,
@@ -103,8 +137,25 @@ export default function Page() {
   const { data: usdcBal } = useBalance({ address, token: USDC, chainId: base.id })
 
   const [busy, setBusy] = useState(false)
-  const [log, setLog] = useState<string>("")
-  const [slippage, setSlippage] = useState<number>(0.005) // 0.5%
+const [log, setLog] = useState<string>("")
+const [slippage, setSlippage] = useState<number>(0.005) // 0.5%
+
+// CoW widgets state
+const [showCow, setShowCow] = useState(false)
+const [ethSellWeiForCow, setEthSellWeiForCow] = useState<bigint>(0n)
+const [cbBtcWeiForCow, setCbBtcWeiForCow] = useState<bigint>(0n)
+
+const cowUrlEth = useMemo(() => {
+  if (!ethSellWeiForCow) return ""
+  const sellAmount = formatUnits(ethSellWeiForCow, 18) // ETH decimals
+  return `https://swap.cow.fi/#/8453/swap/ETH/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
+}, [ethSellWeiForCow])
+
+const cowUrlCbBtc = useMemo(() => {
+  if (!cbBtcWeiForCow) return ""
+  const sellAmount = formatUnits(cbBtcWeiForCow, CBBTC_DECIMALS)
+  return `https://swap.cow.fi/#/8453/swap/${CBBTC}/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
+}, [cbBtcWeiForCow])
 
   function append(message: string) {
     setLog((p) => (p ? `${p}\n${message}` : message))
@@ -188,7 +239,6 @@ export default function Page() {
           to: q.to,
           data: q.data,
           chain: base,
-          // for native swaps, 0x may return value; otherwise set to sell amount
           value: q.value ? BigInt(q.value) : BigInt(q.sellAmount),
         })
         append(`Swap ETH enviado: ${txHash}`)
@@ -199,6 +249,44 @@ export default function Page() {
       }
 
       append("Pronto! Verifique o saldo de USDC abaixo.")
+    } catch (e: any) {
+      const msg = e?.shortMessage || e?.message || String(e)
+      append(`❌ Erro: ${msg}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ====== CoW first (widgets) ======
+  async function prepareCowWidgets() {
+    try {
+      if (!address || !publicClient) return
+      if (chainId !== base.id) throw new Error("Troque a rede para Base.")
+      setBusy(true)
+      setShowCow(false)
+      append("Lendo saldos para CoW…")
+
+      const [nativeEthWei, cbBtcWei] = await Promise.all([
+        publicClient.getBalance({ address }),
+        publicClient.readContract({
+          address: CBBTC,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [address],
+        }) as Promise<bigint>,
+      ])
+
+      let ethForCow = nativeEthWei
+      if (ethForCow > ETH_BUFFER) ethForCow = ethForCow - ETH_BUFFER
+      else ethForCow = 0n
+
+      setEthSellWeiForCow(ethForCow)
+      setCbBtcWeiForCow(cbBtcWei)
+
+      append(
+        `CoW pronto. ETH: ${formatUnits(ethForCow, 18)} | cbBTC: ${formatUnits(cbBtcWei, CBBTC_DECIMALS)}`
+      )
+      setShowCow(true)
     } catch (e: any) {
       const msg = e?.shortMessage || e?.message || String(e)
       append(`❌ Erro: ${msg}`)
@@ -280,6 +368,22 @@ export default function Page() {
         </label>
 
         <button
+          onClick={prepareCowWidgets}
+          disabled={!canOperate || busy}
+          style={{
+            padding: "10px 16px",
+            fontWeight: 800,
+            borderRadius: 10,
+            background: busy ? "#374151" : "#1f2937",
+            color: "#fff",
+            border: "1px solid #374151",
+            cursor: canOperate && !busy ? "pointer" : "not-allowed",
+          }}
+        >
+          {busy ? "Preparando…" : "CoW primeiro (widgets)"}
+        </button>
+
+        <button
           onClick={cashoutAllToUSDC}
           disabled={!canOperate || busy}
           style={{
@@ -292,9 +396,64 @@ export default function Page() {
             cursor: canOperate && !busy ? "pointer" : "not-allowed",
           }}
         >
-          {busy ? "Executando…" : "Cashout total → USDC"}
+          {busy ? "Executando…" : "Cashout total → USDC (fallback 0x)"}
         </button>
       </div>
+
+      {showCow && (
+        <section style={{ marginTop: 18 }}>
+          <h3 style={{ color: "#38bdf8" }}>CoW — cbBTC → USDC</h3>
+          {cbBtcWeiForCow > 0n ? (
+            isMobile ? (
+              <a
+                href={cowUrlCbBtc}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "inline-block", padding: 12, borderRadius: 10, background: "#1f2937", color: "#fff", textDecoration: "none", marginBottom: 12 }}
+              >
+                Abrir na CoW (nova aba)
+              </a>
+            ) : (
+              <iframe
+                src={cowUrlCbBtc}
+                style={{ width: "100%", height: 640, border: 0, borderRadius: 12 }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone; web-share"
+              />
+            )
+          ) : (
+            <p style={{ opacity: 0.7 }}>Sem cbBTC para vender.</p>
+          )}
+
+          <h3 style={{ color: "#38bdf8", marginTop: 16 }}>CoW — ETH → USDC</h3>
+          {ethSellWeiForCow > 0n ? (
+            isMobile ? (
+              <a
+                href={cowUrlEth}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "inline-block", padding: 12, borderRadius: 10, background: "#1f2937", color: "#fff", textDecoration: "none", marginBottom: 12 }}
+              >
+                Abrir na CoW (nova aba)
+              </a>
+            ) : (
+              <iframe
+                src={cowUrlEth}
+                style={{ width: "100%", height: 640, border: 0, borderRadius: 12 }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                allow="clipboard-write; payment; accelerometer; autoplay; camera; gyroscope; microphone; web-share"
+              />
+            )
+          ) : (
+            <p style={{ opacity: 0.7 }}>Sem ETH líquido (após buffer) para vender.</p>
+          )}
+
+          <p style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
+            Em dispositivos móveis, carteiras não injetam provider dentro de iframes. Por isso abrimos a CoW em uma nova aba. 
+            Caso prefira execução automática, use o fallback via 0x.
+          </p>
+        </section>
+      )}
 
       <pre
         style={{
