@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+// pages/cashout.tsx
+"use client"
+
+import { useMemo, useState } from "react"
 import Image from "next/image"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
-import { erc20Abi, formatUnits, getAddress, parseUnits } from "viem"
+import { erc20Abi, formatUnits, getAddress, parseUnits, encodeFunctionData } from "viem"
 import { useAccount, useBalance, usePublicClient, useWalletClient } from "wagmi"
 import { base } from "wagmi/chains"
 import axios from "axios"
 
 // ====== CONSTANTS (Base) ======
-const USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+const USDC  = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
 const CBBTC = getAddress("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf")
-const USDC_DECIMALS = 6
+const USDC_DECIMALS  = 6
 const CBBTC_DECIMALS = 8 // cbBTC on Base uses 8 decimals
 const GAS_BUFFER_WEI = parseUnits("0.0002", 18) // ~0.0002 ETH preserved for gas
 
@@ -19,10 +22,6 @@ const isMobile =
     ? /iphone|ipad|ipod|android/i.test(navigator.userAgent)
     : false
 
-
-// Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
-
-// Leave a tiny gas buffer so the wallet isn't bricked with 0 ETH
 // ====== Types ======
 export type ZeroExQuote = {
   to: `0x${string}`
@@ -64,7 +63,7 @@ async function get0xQuoteBase(opts: {
 
 async function ensureAllowance(params: {
   publicClient: ReturnType<typeof usePublicClient> extends infer T ? T : any
-  walletClient: NonNullable<ReturnType<typeof useWalletClient>["data"]>
+  walletClient: any // simplificado para evitar erro de tipo na Vercel
   owner: `0x${string}`
   token: `0x${string}`
   spender: `0x${string}`
@@ -81,15 +80,14 @@ async function ensureAllowance(params: {
 
   if (current >= amountWei) return
 
-  // Approve using raw sendTransaction (avoids TS mismatch with writeContract)
-  const { encodeFunctionData } = await import("viem")
+  // Approve usando sendTransaction (compatível em mais setups)
   const data = encodeFunctionData({
     abi: erc20Abi,
     functionName: "approve",
     args: [spender, amountWei],
   })
 
-  const hash = await walletClient.sendTransaction({
+  const hash = await walletClient!.sendTransaction({
     account: owner,
     to: token,
     data,
@@ -97,59 +95,39 @@ async function ensureAllowance(params: {
     value: 0n,
   })
   await publicClient!.waitForTransactionReceipt({ hash })
-} = params
-
-  const current: bigint = (await publicClient!.readContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [owner, spender],
-  })) as bigint
-
-  if (current >= amountWei) return
-
-  // Approve exact amount (or you can set MaxUint256 if you prefer)
-  const hash = await walletClient.writeContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: "approve",
-    args: [spender, amountWei],
-    chain: base,
-  })
-  await publicClient!.waitForTransactionReceipt({ hash })
 }
 
 // ====== PAGE ======
-export default function Page() {
+export default function CashoutPage() {
   const { address, isConnected, chainId } = useAccount()
   const publicClient = usePublicClient()
   const { data: walletClient } = useWalletClient()
 
-  // balances (live hooks for UI)
-  const { data: ethBal } = useBalance({ address, chainId: base.id })
+  // balances (live hooks para UI)
+  const { data: ethBal }   = useBalance({ address, chainId: base.id })
   const { data: cbBtcBal } = useBalance({ address, token: CBBTC, chainId: base.id })
-  const { data: usdcBal } = useBalance({ address, token: USDC, chainId: base.id })
+  const { data: usdcBal }  = useBalance({ address, token: USDC, chainId: base.id })
 
   const [busy, setBusy] = useState(false)
-const [log, setLog] = useState<string>("")
-const [slippage, setSlippage] = useState<number>(0.005) // 0.5%
+  const [log, setLog] = useState<string>("")
+  const [slippage, setSlippage] = useState<number>(0.005) // 0.5%
 
-// CoW widgets state
-const [showCow, setShowCow] = useState(false)
-const [ethSellWeiForCow, setEthSellWeiForCow] = useState<bigint>(0n)
-const [cbBtcWeiForCow, setCbBtcWeiForCow] = useState<bigint>(0n)
+  // CoW widgets state
+  const [showCow, setShowCow] = useState(false)
+  const [ethSellWeiForCow, setEthSellWeiForCow] = useState<bigint>(0n)
+  const [cbBtcWeiForCow, setCbBtcWeiForCow] = useState<bigint>(0n)
 
-const cowUrlEth = useMemo(() => {
-  if (!ethSellWeiForCow) return ""
-  const sellAmount = formatUnits(ethSellWeiForCow, 18) // ETH decimals
-  return `https://swap.cow.fi/#/8453/swap/ETH/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
-}, [ethSellWeiForCow])
+  const cowUrlEth = useMemo(() => {
+    if (!ethSellWeiForCow) return ""
+    const sellAmount = formatUnits(ethSellWeiForCow, 18) // ETH decimals
+    return `https://swap.cow.fi/#/8453/swap/ETH/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
+  }, [ethSellWeiForCow])
 
-const cowUrlCbBtc = useMemo(() => {
-  if (!cbBtcWeiForCow) return ""
-  const sellAmount = formatUnits(cbBtcWeiForCow, CBBTC_DECIMALS)
-  return `https://swap.cow.fi/#/8453/swap/${CBBTC}/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
-}, [cbBtcWeiForCow])
+  const cowUrlCbBtc = useMemo(() => {
+    if (!cbBtcWeiForCow) return ""
+    const sellAmount = formatUnits(cbBtcWeiForCow, CBBTC_DECIMALS)
+    return `https://swap.cow.fi/#/8453/swap/${CBBTC}/${USDC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
+  }, [cbBtcWeiForCow])
 
   function append(message: string) {
     setLog((p) => (p ? `${p}\n${message}` : message))
@@ -157,7 +135,7 @@ const cowUrlCbBtc = useMemo(() => {
 
   const canOperate = isConnected && chainId === base.id && publicClient && walletClient
 
-  // ====== MAIN ACTION ======
+  // ====== Fallback automático (0x) ======
   async function cashoutAllToUSDC() {
     try {
       if (!address || !publicClient || !walletClient) return
@@ -165,7 +143,7 @@ const cowUrlCbBtc = useMemo(() => {
       setBusy(true)
       setLog("")
 
-      // --- 1) Read on-chain balances precisely ---
+      // 1) Ler saldos
       append("Lendo saldos on-chain…")
 
       const [nativeEthWei, cbBtcWei] = await Promise.all([
@@ -178,12 +156,12 @@ const cowUrlCbBtc = useMemo(() => {
         }) as Promise<bigint>,
       ])
 
-      // --- 2) Prepare ETH sell (leave small gas buffer) ---
+      // 2) ETH com buffer
       let ethSellWei = nativeEthWei
       if (ethSellWei > GAS_BUFFER_WEI) ethSellWei = ethSellWei - GAS_BUFFER_WEI
       else ethSellWei = 0n
 
-      // --- 3) If have cbBTC, quote & approve, then swap ---
+      // 3) cbBTC → USDC
       if (cbBtcWei > 0n) {
         append(`cbBTC a vender: ${formatUnits(cbBtcWei, CBBTC_DECIMALS)} cbBTC`)
         const q = await get0xQuoteBase({
@@ -204,7 +182,7 @@ const cowUrlCbBtc = useMemo(() => {
           amountWei: cbBtcWei,
         })
         append("Executando swap cbBTC → USDC…")
-        const txHash = await walletClient.sendTransaction({
+        const txHash = await walletClient!.sendTransaction({
           account: address,
           to: q.to,
           data: q.data,
@@ -218,9 +196,9 @@ const cowUrlCbBtc = useMemo(() => {
         append("Sem cbBTC para vender.")
       }
 
-      // --- 4) If have ETH (after buffer), quote & swap ---
+      // 4) ETH → USDC
       if (ethSellWei > 0n) {
-        append(`ETH a vender: ${formatUnits(ethSellWei, 18)} ETH (buffer de gás mantido)`) 
+        append(`ETH a vender: ${formatUnits(ethSellWei, 18)} ETH (buffer de gás mantido)`)
         const q = await get0xQuoteBase({
           sellToken: "ETH",
           buyToken: USDC,
@@ -228,7 +206,7 @@ const cowUrlCbBtc = useMemo(() => {
           takerAddress: address,
           slippagePerc: slippage,
         })
-        const txHash = await walletClient.sendTransaction({
+        const txHash = await walletClient!.sendTransaction({
           account: address,
           to: q.to,
           data: q.data,
@@ -251,7 +229,7 @@ const cowUrlCbBtc = useMemo(() => {
     }
   }
 
-  // ====== CoW first (widgets) ======
+  // ====== CoW primeiro (widgets) ======
   async function prepareCowWidgets() {
     try {
       if (!address || !publicClient) return
@@ -308,7 +286,7 @@ const cowUrlCbBtc = useMemo(() => {
 
       <h1 style={{ color: "#60A5FA", fontWeight: 800, fontSize: 28 }}>Cashout total → USDC (Base)</h1>
       <p style={{ opacity: 0.8, marginTop: 6, marginBottom: 14 }}>
-        Converte automaticamente <strong>cbBTC</strong> e <strong>ETH</strong> para <strong>USDC</strong> via 0x API.
+        CoW (widgets) como fonte primária. Se preferir, use o fallback automático 0x.
         Um pequeno buffer de gás é preservado.
       </p>
 
@@ -443,7 +421,7 @@ const cowUrlCbBtc = useMemo(() => {
           )}
 
           <p style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
-            Em dispositivos móveis, carteiras não injetam provider dentro de iframes. Por isso abrimos a CoW em uma nova aba. 
+            Em dispositivos móveis, carteiras não injetam provider dentro de iframes. Por isso abrimos a CoW em uma nova aba.
             Caso prefira execução automática, use o fallback via 0x.
           </p>
         </section>
@@ -465,7 +443,7 @@ const cowUrlCbBtc = useMemo(() => {
       </pre>
 
       <p style={{ marginTop: 10, fontSize: 12, opacity: 0.65 }}>
-        Powered by 0x. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
+        Powered by CoW & 0x. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
       </p>
     </main>
   )
