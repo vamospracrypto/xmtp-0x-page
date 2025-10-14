@@ -58,21 +58,25 @@ export default function Home() {
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState('')
   const [showCow, setShowCow] = useState(false)
-  const [halfAmountWei, setHalfAmountWei] = useState<bigint>(0n)
+  const [amountCbBtcWei, setAmountCbBtcWei] = useState<bigint>(0n) // 45%
+  const [amountEthWei, setAmountEthWei] = useState<bigint>(0n)     // 35%
   const [enableZeroX, setEnableZeroX] = useState(false)
 
   const { data: usdcBalUi } = useBalance({ address, token: USDC, chainId: base.id })
 
+  // URL CoW para cbBTC com 45%
   const cowUrlCbBtc = useMemo(() => {
-    if (!halfAmountWei) return ''
-    const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS)
+    if (!amountCbBtcWei) return ''
+    const sellAmount = formatUnits(amountCbBtcWei, USDC_DECIMALS)
     return `https://swap.cow.fi/#/8453/swap/${USDC}/${CBBTC}?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
-  }, [halfAmountWei])
+  }, [amountCbBtcWei])
+
+  // URL CoW para ETH com 35%
   const cowUrlEth = useMemo(() => {
-    if (!halfAmountWei) return ''
-    const sellAmount = formatUnits(halfAmountWei, USDC_DECIMALS)
+    if (!amountEthWei) return ''
+    const sellAmount = formatUnits(amountEthWei, USDC_DECIMALS)
     return `https://swap.cow.fi/#/8453/swap/${USDC}/ETH?sellAmount=${sellAmount}&theme=dark&hideNetworkSelector=true`
-  }, [halfAmountWei])
+  }, [amountEthWei])
 
   async function prepareAmountsAndShowCow() {
     if (!address || !publicClient) return
@@ -96,9 +100,19 @@ export default function Home() {
     if (dec !== USDC_DECIMALS) throw new Error('Decimais de USDC inesperados.')
     if (rawBal === 0n) throw new Error('Sem USDC na Base.')
 
-    const half = rawBal / 2n
-    setHalfAmountWei(half)
-    setLog((p) => p + `\nMetade do USDC: ${formatUnits(half, USDC_DECIMALS)}.`)
+    // 45% para cbBTC e 35% para ETH (20% permanece em USDC)
+    const fortyFive = (rawBal * 45n) / 100n
+    const thirtyFive = (rawBal * 35n) / 100n
+
+    setAmountCbBtcWei(fortyFive)
+    setAmountEthWei(thirtyFive)
+
+    setLog((p) =>
+      p +
+      `\n45% (cbBTC): ${formatUnits(fortyFive, USDC_DECIMALS)} USDC.` +
+      `\n35% (ETH): ${formatUnits(thirtyFive, USDC_DECIMALS)} USDC.` +
+      `\nRestante ~20% permanece em USDC.`
+    )
     setShowCow(true)
   }
 
@@ -122,7 +136,7 @@ export default function Home() {
         <Image src="/logo-vamos.png" alt="Vamos Pra Crypto" width={160} height={160} priority />
       </div>
 
-      <h1 style={{ color: '#4ade80' }}>Executar 50/50 Swap</h1>
+      <h1 style={{ color: '#4ade80' }}>Executar Swap Inicial</h1>
       <ConnectButton />
 
       {isConnected ? (
@@ -133,7 +147,7 @@ export default function Home() {
               disabled={busy}
               style={{ padding: '10px 16px', fontWeight: 700, borderRadius: 10, background: '#16a34a', color: '#fff', border: 'none' }}
             >
-              {busy ? 'Preparando…' : 'Executar 50/50 (CoW)'}
+              {busy ? 'Preparando…' : 'Executar Swap Inicial'}
             </button>
           </div>
 
@@ -145,10 +159,10 @@ export default function Home() {
             {log || 'Logs aparecerão aqui.'}
           </pre>
 
-          {showCow && halfAmountWei > 0n && (
+          {showCow && (amountCbBtcWei > 0n || amountEthWei > 0n) && (
             <>
               <h3 style={{ marginTop: 18, color: '#38bdf8' }}>
-                CoW — USDC → cbBTC (50%)
+                CoW — USDC → cbBTC (45%)
               </h3>
 
               {isMobile ? (
@@ -178,7 +192,7 @@ export default function Home() {
               )}
 
               <h3 style={{ marginTop: 18, color: '#38bdf8' }}>
-                CoW — USDC → ETH (50%)
+                CoW — USDC → ETH (35%)
               </h3>
 
               {isMobile ? (
@@ -209,7 +223,6 @@ export default function Home() {
 
               <p style={{ marginTop: 8, fontSize: 12, opacity: .8 }}>
                 No iPhone/iPad, carteiras não injetam o provider em iframes. Por isso abrimos a CoW em uma nova aba.
-                Se preferir execução automática, use o fallback 0x.
               </p>
             </>
           )}
