@@ -286,8 +286,7 @@ export default function CashoutPage() {
 
       <h1 style={{ color: "#60A5FA", fontWeight: 800, fontSize: 28 }}>Cashout total → USDC (Base)</h1>
       <p style={{ opacity: 0.8, marginTop: 6, marginBottom: 14 }}>
-        CoW (widgets) como fonte primária. Fallback automático 0x.
-        Um pequeno buffer de gás é preservado.
+        Conecte a carteira para converter todo saldo cripto para USDC
       </p>
 
       <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
@@ -321,7 +320,7 @@ export default function CashoutPage() {
         <div style={{ background: "#0b0b0b", padding: 12, borderRadius: 10 }}>
           <div style={{ opacity: 0.8, fontSize: 12 }}>Saldo ETH</div>
           <div style={{ fontWeight: 700, fontSize: 18 }}>
-            {ethBal ? `${ethBal.formatted} ETH` : "-"}
+            ? `${parseFloat(ethBal.formatted).toFixed(5)} ETH`: "-"}
           </div>
         </div>
       </section>
@@ -422,7 +421,7 @@ export default function CashoutPage() {
 
           <p style={{ marginTop: 8, fontSize: 12, opacity: 0.75 }}>
             Em dispositivos móveis, carteiras não injetam provider dentro de iframes. Por isso abrimos a CoW em uma nova aba.
-            Caso prefira execução automática, use o fallback via 0x.
+            
           </p>
         </section>
       )}
@@ -443,7 +442,7 @@ export default function CashoutPage() {
       </pre>
 
       <p style={{ marginTop: 10, fontSize: 12, opacity: 0.65 }}>
-        Powered by DeFI-In-Griffo. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
+        Powered by DeFying-Griffo. Atenção: swaps envolvem riscos e slippage. Verifique sempre os valores antes de assinar.
       </p>
     </main>
   )
