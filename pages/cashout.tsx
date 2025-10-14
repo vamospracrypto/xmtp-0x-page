@@ -320,7 +320,9 @@ export default function CashoutPage() {
         <div style={{ background: "#0b0b0b", padding: 12, borderRadius: 10 }}>
           <div style={{ opacity: 0.8, fontSize: 12 }}>Saldo ETH</div>
           <div style={{ fontWeight: 700, fontSize: 18 }}>
-            ? `${parseFloat(ethBal.formatted).toFixed(5)} ETH`: "-"}
+            {ethBal
+    ? `${parseFloat(ethBal.formatted).toFixed(5)} ETH`
+    : "-"}
           </div>
         </div>
       </section>
